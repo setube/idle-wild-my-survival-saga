@@ -27,7 +27,7 @@ export default defineConfig({
         assetFileNames: () => {
           return 'assets/[ext]/[name]-[hash].[ext]'
         }
-      }
+      },
     },
     terserOptions: {
       compress: {

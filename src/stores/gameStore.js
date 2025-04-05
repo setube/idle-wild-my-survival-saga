@@ -1,9 +1,73 @@
 import { defineStore } from 'pinia'
 import { omit } from 'lodash-es'
-import { encryptData, decryptData } from '../plugins/crypto'
 import { recipes, availableBuildings } from '../plugins/recipes'
 
-export const useGameStore = defineStore('game', {
+const openDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(__APP_NAME__, 1)
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result
+      if (!db.objectStoreNames.contains('saves')) {
+        db.createObjectStore('saves', { keyPath: 'id' })
+      }
+    }
+    request.onsuccess = (event) => resolve(event.target.result)
+    request.onerror = (event) => reject(event.target.error)
+  })
+}
+
+const saveToIndexedDB = async (id, data) => {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['saves'], 'readwrite')
+    const store = transaction.objectStore('saves')
+    const request = store.put({ id, data })
+    request.onsuccess = () => { db.close(); resolve(true) }
+    request.onerror = (event) => { db.close(); reject(event.target.error) }
+  })
+}
+
+const loadFromIndexedDB = async (id) => {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['saves'], 'readonly')
+    const store = transaction.objectStore('saves')
+    const request = store.get(id)
+    request.onsuccess = (event) => { db.close(); resolve(event.target.result ? event.target.result.data : null) }
+    request.onerror = (event) => { db.close(); reject(event.target.error) }
+  })
+}
+
+const getAllSavesFromIndexedDB = async () => {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['saves'], 'readonly')
+    const store = transaction.objectStore('saves')
+    const request = store.getAll()
+    request.onsuccess = (event) => { db.close(); resolve(event.target.result.map(item => ({ id: item.id, data: item.data }))) }
+    request.onerror = (event) => { db.close(); reject(event.target.error) }
+  })
+}
+
+const deleteFromIndexedDB = async (id) => {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['saves'], 'readwrite')
+    const store = transaction.objectStore('saves')
+    const request = store.delete(id)
+    request.onsuccess = () => { db.close(); resolve(true) }
+    request.onerror = (event) => { db.close(); reject(event.target.error) }
+  })
+}
+
+// 生成带日期时间的存档名
+const generateSaveId = (baseName = 'Save') => {
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0, 19).replace(/T/, '-').replace(/:/g, '-')
+  return `${baseName}-${dateStr}`
+}
+
+export const useGameStore = defineStore(__APP_NAME__, {
   state: () => ({
     // 玩家基本信息
     player: {
@@ -17,27 +81,21 @@ export const useGameStore = defineStore('game', {
       maxEnergy: 100,
       mental: 100,
       maxMental: 100,
-      // 生存天数
       days: 0,
-      // 轮回次数
       cycles: 0,
     },
-    // 技能树系统
     skillTreeEffects: {
-      // 采集效果
       gatheringEfficiency: 0,
       rareResourceChance: 0,
       gatheringEnergyCost: 0,
       rareHerbChance: 0,
       gatheringYield: 0,
-      // 制作效果
       craftingSpeed: 0,
       resourceSaving: 0,
       extraCraftingOutput: 0,
       toolDurability: 0,
       craftingQuality: 0,
       unlockAdvancedRecipes: false,
-      // 生存效果
       foodConsumption: 0,
       waterConsumption: 0,
       weatherResistance: 0,
@@ -45,14 +103,12 @@ export const useGameStore = defineStore('game', {
       healthRecovery: 0,
       mentalRecovery: 0,
       allSurvivalStats: 0,
-      // 研究效果
       researchSpeed: 0,
       techFragmentYield: 0,
       researchResourceSaving: 0,
       unlockAdvancedTech: false,
       allResearchBonus: 0,
       breakthroughChance: 0,
-      // 战斗效果
       damageBonus: 0,
       damageReduction: 0,
       criticalChance: 0,
@@ -60,13 +116,9 @@ export const useGameStore = defineStore('game', {
       allCombatStats: 0,
       unlockSpecialCombat: false
     },
-    // 已解锁的技能
     unlockedSkills: {},
-    // 季节系统
     season: {
-      // 季节长度（天）
       seasonLength: 30,
-      // 季节效果
       effects: {
         foodGrowthRate: 1.0,
         herbGrowthRate: 1.0,
@@ -75,22 +127,20 @@ export const useGameStore = defineStore('game', {
         mentalRecovery: 1.0
       }
     },
-    // 天气系统
     weather: {
-      current: 'clear', // 当前天气类型
-      duration: 6, // 持续时间（小时）
-      nextChangeDay: 1, // 下次变化的天数
-      nextChangeHour: 6, // 下次变化的小时
+      current: 'clear',
+      duration: 6,
+      nextChangeDay: 1,
+      nextChangeHour: 6,
       effects: {
-        gatheringEfficiency: 1.0, // 采集效率修正
-        energyConsumption: 1.0, // 体力消耗修正
-        waterConsumption: 1.0, // 水消耗修正
-        foodConsumption: 1.0, // 食物消耗修正
-        movementSpeed: 1.0, // 移动速度修正
-        explorationEfficiency: 1.0 // 探索效率修正
+        gatheringEfficiency: 1.0,
+        energyConsumption: 1.0,
+        waterConsumption: 1.0,
+        foodConsumption: 1.0,
+        movementSpeed: 1.0,
+        explorationEfficiency: 1.0
       }
     },
-    // 基础资源
     resources: {
       food: 10,
       water: 10,
@@ -99,7 +149,6 @@ export const useGameStore = defineStore('game', {
       metal: 0,
       herb: 0,
       rare_herb: 0,
-      // 高级资源
       medicine: 0,
       tools: 0,
       rope: 0,
@@ -108,11 +157,9 @@ export const useGameStore = defineStore('game', {
       electronic_components: 0,
       fuel: 0,
       crystal: 0,
-      // 特殊资源
       ancientRelic: 0,
       techFragment: 0,
     },
-    // 资源上限
     resourceLimits: {
       food: 50,
       water: 50,
@@ -132,50 +179,37 @@ export const useGameStore = defineStore('game', {
       ancientRelic: 5,
       techFragment: 5,
     },
-    // 技能等级
     skills: {
-      gathering: 1, // 采集
-      crafting: 1, // 制作
-      combat: 1, // 战斗
-      survival: 1, // 生存
-      research: 1, // 研究
+      gathering: 1,
+      crafting: 1,
+      combat: 1,
+      survival: 1,
+      research: 1,
     },
-    // 已解锁的建筑
     buildings: [],
-    // 当前进行中的活动
     currentActivities: [],
-    // 游戏时间
     gameTime: {
       day: 1,
-      hour: 6, // 游戏从早上6点开始
+      hour: 6,
       minute: 0,
-      // 时间流逝速度，实际秒:游戏分钟
-      timeScale: 1, // 1秒 = 1分钟游戏时间
-      // 游戏开始的时间戳
+      timeScale: 1,
       startTime: Date.now(),
-      // 当前游戏时间戳
       get timestamp() {
         return Date.now()
       }
     },
-    // 游戏设置
     settings: {
       autoSave: true,
       darkMode: false,
       soundEnabled: true,
       notificationsEnabled: true,
     },
-    // 事件日志
     eventLog: [],
-    // 成就系统
     achievements: {
-      // 已解锁的成就ID列表
       unlocked: [],
-      // 成就相关的计数器
       explorationCount: 0,
       extremeWeatherSurvived: false,
       healthyDays: 0,
-      // 其他成就相关的状态
       resourcesCollected: {
         food: 0,
         water: 0,
@@ -185,27 +219,21 @@ export const useGameStore = defineStore('game', {
         herb: 0
       }
     },
-    // 游戏状态
-    gameState: 'playing', // playing, paused, gameover
-    // 任务系统
-    activeQuests: [], // 进行中的任务
-    completedQuests: [] // 已完成的任务
+    gameState: 'playing',
+    activeQuests: [],
+    completedQuests: []
   }),
   getters: {
-    // 计算玩家总体实力
     playerPower: (state) => {
       return Object.values(state.skills).reduce((sum, level) => sum + level, 0)
     },
-    // 计算资源总量
     totalResources: (state) => {
       return Object.values(state.resources).reduce((sum, amount) => sum + amount, 0)
     },
-    // 计算当前时间字符串
     currentTimeString: (state) => {
       const { day, hour, minute } = state.gameTime
       return `第${day}天 ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
     },
-    // 检查资源是否足够
     hasEnoughResources: (state) => (requirements) => {
       for (const [resource, amount] of Object.entries(requirements)) {
         if (state.resources[resource] < amount) return false
@@ -216,10 +244,90 @@ export const useGameStore = defineStore('game', {
   actions: {
     // 初始化游戏
     initGame() {
-      // 重置游戏状态
       this.$reset()
-      localStorage.removeItem(__APP_NAME__)
       this.addToEventLog('你醒来了，发现自己身处一片荒野...')
+    },
+    async saveGame(saveId = generateSaveId()) {
+      try {
+        const filteredState = omit(this.$state, ['eventLog', 'currentActivities'])
+        const saveData = encryptData ? encryptData(filteredState) : JSON.stringify(filteredState)
+        await saveToIndexedDB(saveId, saveData)
+        this.addToEventLog(`存档 ${saveId} 已保存`)
+        return saveId // 返回生成的存档 ID
+      } catch (error) {
+        this.addToEventLog('存档保存失败: ' + error.message)
+        return null
+      }
+    },
+
+    async loadGame(saveId) {
+      try {
+        const rawData = await loadFromIndexedDB(saveId)
+        if (rawData) {
+          const decryptedData = decryptData ? decryptData(rawData) : JSON.parse(rawData)
+          this.$patch(decryptedData)
+          this.initBuildingEffects()
+          this.addToEventLog(`存档 ${saveId} 已加载`)
+          return true
+        } else {
+          this.addToEventLog(`未找到存档 ${saveId}`)
+          return false
+        }
+      } catch (error) {
+        this.addToEventLog('存档加载失败: ' + error.message)
+        return false
+      }
+    },
+
+    async getSaveList() {
+      try {
+        const saves = await getAllSavesFromIndexedDB()
+        return saves.map(save => save.id)
+      } catch (error) {
+        this.addToEventLog('获取存档列表失败: ' + error.message)
+        return []
+      }
+    },
+
+    async deleteSave(saveId) {
+      try {
+        await deleteFromIndexedDB(saveId)
+        this.addToEventLog(`存档 ${saveId} 已删除`)
+        return true
+      } catch (error) {
+        this.addToEventLog('存档删除失败: ' + error.message)
+        return false
+      }
+    },
+
+    async exportSave(saveId) {
+      try {
+        const rawData = await loadFromIndexedDB(saveId)
+        if (rawData) {
+          this.addToEventLog(`存档 ${saveId} 已导出`)
+          return rawData
+        } else {
+          this.addToEventLog(`未找到存档 ${saveId}`)
+          return null
+        }
+      } catch (error) {
+        this.addToEventLog('存档导出失败: ' + error.message)
+        return null
+      }
+    },
+
+    async importSave(saveId = generateSaveId('Imported'), saveData) {
+      try {
+        const parsedData = decryptData ? decryptData(saveData) : JSON.parse(saveData)
+        if (!parsedData || typeof parsedData !== 'object') throw new Error('无效的存档数据')
+        const encryptedData = encryptData ? encryptData(parsedData) : JSON.stringify(parsedData)
+        await saveToIndexedDB(saveId, encryptedData)
+        this.addToEventLog(`存档 ${saveId} 已导入`)
+        return saveId
+      } catch (error) {
+        this.addToEventLog('存档导入失败: ' + error.message)
+        return null
+      }
     },
     // 获取技能名称
     getSkillName(skillId) {
@@ -234,31 +342,25 @@ export const useGameStore = defineStore('game', {
     },
     // 更新技能效果
     updateSkillEffects(skillId, effects, level) {
-      // 记录已解锁的技能
       if (!this.unlockedSkills[skillId]) this.unlockedSkills[skillId] = 0
       this.unlockedSkills[skillId] = level
-      // 应用效果到游戏状态
       for (const [effect, value] of Object.entries(effects)) {
         if (this.skillTreeEffects[effect] !== undefined) {
-          // 对于百分比效果，根据等级累加
           if (typeof value === 'number') this.skillTreeEffects[effect] = parseFloat((this.skillTreeEffects[effect] + value).toFixed(2))
-          else this.skillTreeEffects[effect] = value // 对于布尔值效果，直接设置
+          else this.skillTreeEffects[effect] = value
         }
       }
-      // 立即应用生存技能效果
       if (skillId.includes('efficient_metabolism') ||
-        skillId.includes('weather_adaptation') ||
-        skillId.includes('energy_conservation') ||
-        skillId.includes('natural_healing') ||
-        skillId.includes('survival_expert')) {
+          skillId.includes('weather_adaptation') ||
+          skillId.includes('energy_conservation') ||
+          skillId.includes('natural_healing') ||
+          skillId.includes('survival_expert')) {
         this.applySurvivalSkillEffects()
       }
-      // 记录到日志
       this.addToEventLog(`技能效果已更新: ${this.getSkillName(skillId.split('_')[0])}技能`)
     },
     // 获取技能效果修正值
     getSkillEffectModifier(effectType) {
-      // 返回修正值，如果不存在则返回默认值
       const effect = this.skillTreeEffects[effectType]
       if (effect === undefined) return 0
       return effect
@@ -266,13 +368,9 @@ export const useGameStore = defineStore('game', {
     // 应用技能效果到资源收集
     applyGatheringSkillEffects(baseAmount, resourceType) {
       let amount = baseAmount
-      // 应用采集效率加成
       if (this.skillTreeEffects.gatheringEfficiency > 0) amount *= (1 + this.skillTreeEffects.gatheringEfficiency)
-      // 应用产出加成
       if (this.skillTreeEffects.gatheringYield > 0) amount *= (1 + this.skillTreeEffects.gatheringYield)
-      // 对特定资源类型应用额外效果
       if (resourceType === 'herb' && this.skillTreeEffects.rareHerbChance > 0) {
-        // 有几率获得稀有草药
         if (Math.random() < this.skillTreeEffects.rareHerbChance) {
           this.addResource('rare_herb', 1)
           this.addToEventLog('你的技能帮助你发现了一株稀有草药！')
@@ -280,91 +378,47 @@ export const useGameStore = defineStore('game', {
       }
       return Math.floor(amount)
     },
-    // 保存游戏
-    saveGame() {
-      const filteredState = omit(this.$state, ['eventLog', 'currentActivities'])
-      const encryptedData = encryptData(filteredState)
-      if (encryptedData) {
-        try {
-          const encodedAppName = btoa(`+++${__APP_NAME__}`)
-          localStorage.setItem(__APP_NAME__, `${encryptedData}${encodedAppName}`)
-          this.addToEventLog('游戏数据已保存')
-        } catch (error) {
-          this.addToEventLog('数据保存失败:', error)
-        }
-      } else {
-        this.addToEventLog('数据加密失败')
-      }
-    },
-    // 加载游戏
-    loadGame() {
-      const encodedAppName = btoa(`+++${__APP_NAME__}`)
-      const saveData = localStorage.getItem(__APP_NAME__).replace(encodedAppName, '')
-      if (saveData) {
-        try {
-          this.$state = decryptData(saveData)
-          // 重新初始化建筑效果
-          this.initBuildingEffects()
-          this.addToEventLog('游戏已加载')
-          return true
-        } catch (error) {
-          this.addToEventLog('数据加载失败:', error)
-        }
-      }
-      return false
-    },
     // 添加资源
     addResource(resource, amount) {
       if (!this.resources.hasOwnProperty(resource)) return false
-      // 确保不超过上限
       const newAmount = this.resources[resource] + amount
       this.resources[resource] = Math.min(newAmount, this.resourceLimits[resource])
       return true
     },
-    // 任务系统相关方法
     // 接受任务
     acceptQuest(quest) {
-      // 检查任务是否已经在进行中
       if (this.activeQuests.some(q => q.id === quest.id)) {
         this.addToEventLog(`任务 ${quest.name} 已经在进行中`)
         return false
       }
-      // 检查任务是否已经完成
       if (this.completedQuests.some(q => q.id === quest.id)) {
         this.addToEventLog(`任务 ${quest.name} 已经完成`)
         return false
       }
-      // 添加任务到进行中列表
       this.activeQuests.push(quest)
       this.addToEventLog(`接受了任务: ${quest.name}`)
       return true
     },
     // 完成任务
     completeQuest(quest) {
-      // 查找任务在进行中列表的索引
       const questIndex = this.activeQuests.findIndex(q => q.id === quest.id)
       if (questIndex === -1) {
         this.addToEventLog(`任务 ${quest.name} 不在进行中`)
         return false
       }
-      // 从进行中列表移除任务
       const completedQuest = this.activeQuests.splice(questIndex, 1)[0]
-      // 添加到已完成列表
       this.completedQuests.push(completedQuest)
-      // 发放奖励
       this.giveQuestRewards(completedQuest)
       this.addToEventLog(`完成了任务: ${completedQuest.name}`)
       return true
     },
     // 放弃任务
     abandonQuest(quest) {
-      // 查找任务在进行中列表的索引
       const questIndex = this.activeQuests.findIndex(q => q.id === quest.id)
       if (questIndex === -1) {
         this.addToEventLog(`任务 ${quest.name} 不在进行中`)
         return false
       }
-      // 从进行中列表移除任务
       this.activeQuests.splice(questIndex, 1)
       this.addToEventLog(`放弃了任务: ${quest.name}`)
       return true
@@ -372,31 +426,25 @@ export const useGameStore = defineStore('game', {
     // 发放任务奖励
     giveQuestRewards(quest) {
       if (!quest.rewards) return
-      // 处理各种类型的奖励
       for (const [rewardType, amount] of Object.entries(quest.rewards)) {
         switch (rewardType) {
           case 'exp':
-            // 增加经验值
             this.player.exp += amount
             this.checkLevelUp()
             break
           case 'maxHealth':
-            // 增加最大健康值
             this.player.maxHealth += amount
             this.player.health += amount
             break
           case 'maxEnergy':
-            // 增加最大体力值
             this.player.maxEnergy += amount
             this.player.energy += amount
             break
           case 'maxMental':
-            // 增加最大精神值
             this.player.maxMental += amount
             this.player.mental += amount
             break
           default:
-            // 如果是资源类型的奖励
             if (this.resources.hasOwnProperty(rewardType)) this.addResource(rewardType, amount)
             break
         }
@@ -407,9 +455,7 @@ export const useGameStore = defineStore('game', {
       while (this.player.exp >= this.player.expToNextLevel) {
         this.player.exp -= this.player.expToNextLevel
         this.player.level += 1
-        // 增加下一级所需经验
         this.player.expToNextLevel = Math.floor(this.player.expToNextLevel * 1.5)
-        // 升级奖励
         this.player.maxHealth += 5
         this.player.health = this.player.maxHealth
         this.player.maxEnergy += 5
@@ -430,23 +476,17 @@ export const useGameStore = defineStore('game', {
     startActivity(recipeId) {
       const recipe = recipes().find(r => r.id === recipeId)
       if (!recipe) return false
-      // 检查技能要求
       for (const [skill, level] of Object.entries(recipe.skillRequired)) {
         if (this.skills[skill] < level) {
           this.addToEventLog(`你的${skill}技能等级不足，无法进行${recipe.name}`)
           return false
         }
       }
-      // 检查并消耗输入资源
       for (const [resource, amount] of Object.entries(recipe.inputs)) {
         if (resource === 'energy') {
-          // 计算能量消耗，应用技能树效果
           let energyAmount = amount
-          // 应用采集活动的能量消耗减少效果
           if (recipe.category === 'gathering' && this.skillTreeEffects.gatheringEnergyCost < 0) energyAmount = Math.floor(energyAmount * (1 + this.skillTreeEffects.gatheringEnergyCost))
-          // 应用通用能量消耗减少效果
           if (this.skillTreeEffects.energyConsumption < 0) energyAmount = Math.floor(energyAmount * (1 + this.skillTreeEffects.energyConsumption))
-          // 确保至少消耗1点能量
           energyAmount = Math.max(1, energyAmount)
           if (this.player.energy < energyAmount) {
             this.addToEventLog('你的体力不足')
@@ -460,28 +500,21 @@ export const useGameStore = defineStore('game', {
           }
         }
       }
-      // 创建活动
-      // 计算活动持续时间，应用技能树效果
       let activityDuration = recipe.duration
-      // 应用采集效率加成
       if (recipe.category === 'gathering' && this.skillTreeEffects.gatheringEfficiency > 0) activityDuration = Math.floor(activityDuration / (1 + this.skillTreeEffects.gatheringEfficiency))
-      // 应用制作速度加成
       if (recipe.category === 'crafting' && this.skillTreeEffects.craftingSpeed > 0) activityDuration = Math.floor(activityDuration / (1 + this.skillTreeEffects.craftingSpeed))
-      // 应用研究速度加成
       if (recipe.category === 'research' && this.skillTreeEffects.researchSpeed > 0) activityDuration = Math.floor(activityDuration / (1 + this.skillTreeEffects.researchSpeed))
-      // 确保活动至少持续1秒
       activityDuration = Math.max(1, activityDuration)
       const activity = {
         id: Date.now(),
         recipeId,
         name: recipe.name,
         startTime: Date.now(),
-        duration: activityDuration * 1000, // 转换为毫秒
+        duration: activityDuration * 1000,
         completed: false
       }
       this.currentActivities.push(activity)
       this.addToEventLog(`开始${recipe.name}`)
-      // 设置定时器完成活动，使用修改后的持续时间
       setTimeout(() => this.completeActivity(activity.id), activityDuration * 1000)
       return true
     },
@@ -490,7 +523,6 @@ export const useGameStore = defineStore('game', {
       const activityIndex = this.currentActivities.findIndex(a => a.id === activityId)
       if (activityIndex === -1) return false
       const activity = this.currentActivities[activityIndex]
-      // 移除活动
       this.currentActivities.splice(activityIndex, 1)
       this.addToEventLog(`取消了${activity.name}活动`)
       return true
@@ -501,55 +533,34 @@ export const useGameStore = defineStore('game', {
       if (activityIndex === -1) return false
       const activity = this.currentActivities[activityIndex]
       const recipe = recipes().find(r => r.id === activity.recipeId)
-      // 移除活动
       this.currentActivities.splice(activityIndex, 1)
-      // 应用技能效果到输出资源
       let modifiedOutputs = {}
-      // 添加输出资源
       for (const [resource, range] of Object.entries(recipe.outputs)) {
-        let amount;
-        // 检查输出是数组还是单个数值
-        if (Array.isArray(range)) {
-          const [min, max] = range
-          amount = Math.floor(Math.random() * (max - min + 1)) + min
-        } else {
-          // 如果是单个数值，直接使用
-          amount = range
-        }
-        // 应用技能效果
-        if (recipe.category === 'gathering') amount = this.applyGatheringSkillEffects(amount, resource) // 应用采集技能效果
-        else if (recipe.category === 'crafting') modifiedOutputs[resource] = amount // 对于制作活动，先收集所有输出，稍后应用技能效果
-        else if (recipe.category === 'research' && resource === 'techFragment') amount = this.applyResearchSkillEffects(amount) // 应用研究技能效果
-        // 如果不是制作活动，直接添加资源
+        let amount = Array.isArray(range) ? Math.floor(Math.random() * (range[1] - range[0] + 1)) + range[0] : range
+        if (recipe.category === 'gathering') amount = this.applyGatheringSkillEffects(amount, resource)
+        else if (recipe.category === 'crafting') modifiedOutputs[resource] = amount
+        else if (recipe.category === 'research' && resource === 'techFragment') amount = this.applyResearchSkillEffects(amount)
         if (recipe.category !== 'crafting') {
           this.addResource(resource, amount)
           this.addToEventLog(`获得 ${amount} ${this.getResourceName(resource)}`)
-          // 更新成就系统的资源收集计数
           if (this.achievements.resourcesCollected.hasOwnProperty(resource)) this.achievements.resourcesCollected[resource] += amount
         }
       }
-      // 对制作活动应用技能效果并添加资源
       if (recipe.category === 'crafting' && Object.keys(modifiedOutputs).length > 0) {
-        // 应用制作技能效果
         const finalOutputs = this.applyCraftingSkillEffects(recipe, modifiedOutputs)
-        // 添加最终资源
         for (const [resource, amount] of Object.entries(finalOutputs)) {
           this.addResource(resource, amount)
           this.addToEventLog(`获得 ${amount} ${this.getResourceName(resource)}`)
-          // 更新成就系统的资源收集计数
           if (this.achievements.resourcesCollected.hasOwnProperty(resource)) this.achievements.resourcesCollected[resource] += amount
         }
       }
-      // 如果是探索活动，增加探索计数
       if (recipe.category === 'exploration') this.achievements.explorationCount += 1
-      // 增加相关技能经验
       for (const skill in recipe.skillRequired) this.addSkillExp(skill, 1)
       return true
     },
     // 增加技能经验
     addSkillExp(skill, exp) {
       if (!this.skills.hasOwnProperty(skill)) return false
-      // 技能名称映射
       const skillNames = {
         gathering: '采集',
         crafting: '制作',
@@ -557,22 +568,18 @@ export const useGameStore = defineStore('game', {
         survival: '生存',
         research: '研究'
       }
-      // 改进的技能成长系统
-      // 技能等级越高，提升越困难
       const currentLevel = this.skills[skill]
       const chanceToLevel = 0.1 * exp / Math.sqrt(currentLevel)
       if (Math.random() < chanceToLevel) {
         this.skills[skill] += 1
         this.addToEventLog(`${skillNames[skill] || skill}技能提升到${this.skills[skill]}级！`)
-        // 技能提升带来的额外奖励
-        if (this.skills[skill] % 5 === 0) { // 每5级有特殊奖励
+        if (this.skills[skill] % 5 === 0) {
           switch (skill) {
             case 'gathering':
               this.player.maxEnergy += 5
               this.addToEventLog('你的采集技能提高，增加了最大体力值！')
               break
             case 'crafting':
-              // 解锁新的制作配方
               this.addToEventLog('你的制作技能提高，可以制作更复杂的物品了！')
               break
             case 'combat':
@@ -581,7 +588,6 @@ export const useGameStore = defineStore('game', {
               this.addToEventLog('你的战斗技能提高，增加了最大健康值！')
               break
             case 'survival':
-              // 提高资源上限
               for (const key in this.resourceLimits) {
                 this.resourceLimits[key] *= 1.1
               }
@@ -600,16 +606,12 @@ export const useGameStore = defineStore('game', {
     // 应用技能效果到制作活动
     applyCraftingSkillEffects(recipe, outputs) {
       let modifiedOutputs = { ...outputs }
-      // 应用制作质量加成
       if (this.skillTreeEffects.craftingQuality > 0) {
-        // 对于数值型输出，增加产量
         for (const [resource, amount] of Object.entries(modifiedOutputs)) {
           if (typeof amount === 'number') modifiedOutputs[resource] = Math.floor(amount * (1 + this.skillTreeEffects.craftingQuality))
         }
       }
-      // 应用额外产出几率
       if (this.skillTreeEffects.extraCraftingOutput > 0 && Math.random() < this.skillTreeEffects.extraCraftingOutput) {
-        // 随机选择一种资源增加产量
         const resources = Object.keys(modifiedOutputs)
         if (resources.length > 0) {
           const resource = resources[Math.floor(Math.random() * resources.length)]
@@ -624,9 +626,7 @@ export const useGameStore = defineStore('game', {
     // 应用技能效果到研究活动
     applyResearchSkillEffects(techFragment) {
       let amount = techFragment
-      // 应用研究加成
       if (this.skillTreeEffects.techFragmentYield > 0) amount = Math.floor(amount * (1 + this.skillTreeEffects.techFragmentYield))
-      // 应用突破性发现几率
       if (this.skillTreeEffects.breakthroughChance > 0 && Math.random() < this.skillTreeEffects.breakthroughChance) {
         amount += 1
         this.addToEventLog('你取得了突破性的研究发现！')
@@ -635,7 +635,6 @@ export const useGameStore = defineStore('game', {
     },
     // 应用技能效果到生存属性
     applySurvivalSkillEffects() {
-      // 应用最大健康值和精神值加成
       if (this.skillTreeEffects.maxHealth > 0) {
         const healthBonus = Math.floor(this.player.maxHealth * this.skillTreeEffects.maxHealth)
         this.player.maxHealth += healthBonus
@@ -644,52 +643,37 @@ export const useGameStore = defineStore('game', {
         const mentalBonus = Math.floor(this.player.maxMental * this.skillTreeEffects.maxMental)
         this.player.maxMental += mentalBonus
       }
-      // 应用恢复速度加成
-      // 这些效果会在游戏循环中使用
     },
     // 推进游戏时间
     advanceTime(minutes) {
       this.gameTime.minute += minutes
-      // 处理时间进位
       while (this.gameTime.minute >= 60) {
         this.gameTime.minute -= 60
         this.gameTime.hour += 1
-        // 每小时消耗水和食物
         this.hourlyUpdate()
       }
       while (this.gameTime.hour >= 24) {
         this.gameTime.hour -= 24
         this.gameTime.day += 1
         this.player.days += 1
-        // 每日更新
         this.dailyUpdate()
       }
     },
     // 每小时更新
     hourlyUpdate() {
-      // 应用天气效果
       this.applyWeatherEffects()
-      // 消耗基本资源（考虑天气和技能树影响）
       let waterConsumptionRate = 1 * this.weather.effects.waterConsumption
       let foodConsumptionRate = 1 * this.weather.effects.foodConsumption
-      // 应用技能树效果 - 水和食物消耗减少
-      if (this.skillTreeEffects.waterConsumption < 0) waterConsumptionRate *= (1 + this.skillTreeEffects.waterConsumption) // 负值表示减少消耗
-      if (this.skillTreeEffects.foodConsumption < 0) foodConsumptionRate *= (1 + this.skillTreeEffects.foodConsumption) // 负值表示减少消耗
-      const waterConsumption = Math.max(1, Math.ceil(waterConsumptionRate)) // 至少消耗1点
-      const foodConsumption = Math.max(1, Math.ceil(foodConsumptionRate)) // 至少消耗1点
+      if (this.skillTreeEffects.waterConsumption < 0) waterConsumptionRate *= (1 + this.skillTreeEffects.waterConsumption)
+      if (this.skillTreeEffects.foodConsumption < 0) foodConsumptionRate *= (1 + this.skillTreeEffects.foodConsumption)
+      const waterConsumption = Math.max(1, Math.ceil(waterConsumptionRate))
+      const foodConsumption = Math.max(1, Math.ceil(foodConsumptionRate))
       this.consumeResource('water', waterConsumption)
       this.consumeResource('food', foodConsumption)
-      // 应用建筑的小时效果
       this.applyBuildingEffectsHourly()
-      // 根据时间段自然恢复体力
-      let baseEnergyRecovery = 0
-      // 夜间休息恢复更多体力
-      baseEnergyRecovery = this.gameTime.hour >= 22 || this.gameTime.hour <= 6 ? 5 : 1
-      // 应用天气对体力恢复的影响
-      if (this.weather.current === 'hot' || this.weather.current === 'cold') baseEnergyRecovery *= 0.8 // 极端天气减少体力恢复
-      // 应用基础体力恢复
+      let baseEnergyRecovery = this.gameTime.hour >= 22 || this.gameTime.hour <= 6 ? 5 : 1
+      if (this.weather.current === 'hot' || this.weather.current === 'cold') baseEnergyRecovery *= 0.8
       this.player.energy = Math.min(this.player.energy + baseEnergyRecovery, this.player.maxEnergy)
-      // 应用技能树中的健康和精神恢复效果
       if (this.skillTreeEffects.healthRecovery > 0) {
         const healthRecovery = Math.floor(this.player.maxHealth * 0.01 * this.skillTreeEffects.healthRecovery)
         this.player.health = Math.min(this.player.health + healthRecovery, this.player.maxHealth)
@@ -698,79 +682,59 @@ export const useGameStore = defineStore('game', {
         const mentalRecovery = Math.floor(this.player.maxMental * 0.01 * this.skillTreeEffects.mentalRecovery)
         this.player.mental = Math.min(this.player.mental + mentalRecovery, this.player.maxMental)
       }
-      // 检查资源状态并影响健康
       if (this.resources.food <= 0 || this.resources.water <= 0) {
-        // 极端天气下，缺乏资源的影响更严重
-        let healthPenalty = 5
-        if (['hot', 'cold', 'storm'].includes(this.weather.current)) {
-          healthPenalty = 8
-          this.addToEventLog(`在${this.getWeatherName()}天气下，缺乏基本资源使你的健康迅速恶化！`)
-        } else {
-          this.addToEventLog('你感到饥饿和口渴，健康下降了')
-        }
+        let healthPenalty = ['hot', 'cold', 'storm'].includes(this.weather.current) ? 8 : 5
         this.player.health -= healthPenalty
+        this.addToEventLog(['hot', 'cold', 'storm'].includes(this.weather.current)
+            ? `在${this.getWeatherName()}天气下，缺乏基本资源使你的健康迅速恶化！`
+            : '你感到饥饿和口渴，健康下降了')
       }
-      // 检查游戏结束条件
       if (this.player.health <= 0) this.gameOver()
     },
     // 每日更新
     dailyUpdate() {
-      // 随机事件
       this.triggerRandomEvent()
-      // 季节性资源自然恢复
       this.applySeasonalEffects()
-      // 应用建筑效果(每天)
       this.applyBuildingEffectsDay()
-      // 检查是否需要更新天气
       this.checkWeatherChange()
-      // 更新成就系统的健康天数计数
       if (this.player.health >= 90) {
         this.achievements.healthyDays += 1
       } else {
-        this.achievements.healthyDays = 0 // 重置连续健康天数
+        this.achievements.healthyDays = 0
       }
       this.addToEventLog(`第${this.gameTime.day}天开始了`)
-      // 自动保存
-      if (this.settings.autoSave) this.saveGame()
     },
     // 建造新建筑
     buildNewBuilding(buildingId, level) {
-      // 查找建筑配置
       const buildingConfig = availableBuildings().find(b => b.id === buildingId)
       if (!buildingConfig) {
         this.addToEventLog(`未找到建筑: ${buildingId}`)
         return false
       }
-      // 获取指定等级的配置
       const levelConfig = buildingConfig.levels.find(l => l.level === level)
       if (!levelConfig) {
         this.addToEventLog(`未找到建筑等级配置: ${buildingId} 等级 ${level}`)
         return false
       }
-      // 检查技能要求
       for (const [skill, requiredLevel] of Object.entries(levelConfig.requirements)) {
         if (this.skills[skill] < requiredLevel) {
           this.addToEventLog(`你的${skill}技能等级不足，需要达到${requiredLevel}级`)
           return false
         }
       }
-      // 检查并消耗资源
       for (const [resource, amount] of Object.entries(levelConfig.cost)) {
         if (!this.consumeResource(resource, amount)) {
           this.addToEventLog(`资源不足: ${resource}`)
           return false
         }
       }
-      // 检查是否已有该建筑
       const existingBuildingIndex = this.buildings.findIndex(b => b.id === buildingId)
       if (existingBuildingIndex !== -1) {
-        // 已有建筑，检查是否可以升级
         const existingBuilding = this.buildings[existingBuildingIndex]
         if (existingBuilding.level >= level) {
           this.addToEventLog(`${buildingConfig.name}已经是等级${existingBuilding.level}，无需重复建造`)
           return false
         }
-        // 升级建筑
         this.buildings[existingBuildingIndex] = {
           id: buildingId,
           name: buildingConfig.name,
@@ -779,7 +743,6 @@ export const useGameStore = defineStore('game', {
         }
         this.addToEventLog(`${buildingConfig.name}已升级到等级${level}`)
       } else {
-        // 新建建筑
         this.buildings.push({
           id: buildingId,
           name: buildingConfig.name,
@@ -788,7 +751,6 @@ export const useGameStore = defineStore('game', {
         })
         this.addToEventLog(`建造了${buildingConfig.name}(等级${level})`)
       }
-      // 重新初始化建筑效果
       this.initBuildingEffects()
       return true
     },
@@ -799,12 +761,9 @@ export const useGameStore = defineStore('game', {
       const seasonIndex = Math.floor((day - 1) % (seasonLength * 4) / seasonLength)
       const seasonKeys = ['spring', 'summer', 'autumn', 'winter']
       const currentSeasonKey = seasonKeys[seasonIndex]
-      // 更新季节效果
       this.updateSeasonEffects(currentSeasonKey)
-      // 根据季节应用不同效果
       switch (seasonIndex) {
-        case 0: // 春季
-          // 植物生长旺盛
+        case 0:
           if (Math.random() < 0.3 * this.season.effects.foodGrowthRate) {
             const foodAmount = Math.floor(Math.random() * 3) + 1
             this.addResource('food', foodAmount)
@@ -816,13 +775,11 @@ export const useGameStore = defineStore('game', {
             this.addToEventLog(`春季草药生长旺盛，你额外获得了${herbAmount}单位草药`)
           }
           break
-        case 1: // 夏季
-          // 高温导致水分消耗增加
+        case 1:
           if (Math.random() < 0.3 * this.season.effects.waterConsumption) {
             this.consumeResource('water', 1)
             this.addToEventLog('夏季高温导致额外的水分消耗')
           }
-          // 夏季可能发现特殊资源
           if (Math.random() < 0.15) {
             const randomResource = ['metal', 'stone', 'fuel'][Math.floor(Math.random() * 3)]
             const amount = Math.floor(Math.random() * 2) + 1
@@ -830,110 +787,77 @@ export const useGameStore = defineStore('game', {
             this.addToEventLog(`在炎热的夏季，你发现了${amount}单位${this.getResourceName(randomResource)}`)
           }
           break
-        case 2: // 秋季
-          // 收获季节
+        case 2:
           if (Math.random() < 0.3 * this.season.effects.foodGrowthRate) {
             const foodAmount = Math.floor(Math.random() * 4) + 2
             this.addResource('food', foodAmount)
             this.addToEventLog(`秋季是收获的季节，你额外获得了${foodAmount}单位食物`)
           }
-          // 秋季可能找到额外的木材
           if (Math.random() < 0.2) {
             const woodAmount = Math.floor(Math.random() * 3) + 2
             this.addResource('wood', woodAmount)
             this.addToEventLog(`秋季落叶，你收集了${woodAmount}单位额外的木材`)
           }
           break
-        case 3: // 冬季
-          // 寒冷导致食物消耗增加
+        case 3:
           if (Math.random() < 0.3 * this.season.effects.energyConsumption) {
             this.consumeResource('food', 1)
             this.addToEventLog('冬季寒冷导致额外的食物消耗')
           }
-          // 冬季精神状态可能下降
           if (Math.random() < 0.2 && this.player.mental > 10) {
             this.player.mental -= 2
             this.addToEventLog('漫长的冬季让你感到有些压抑')
           }
           break
       }
-      // 季节变化检测
       this.checkSeasonChange(day, seasonLength, seasonIndex)
     },
     // 更新季节效果
     updateSeasonEffects(seasonKey) {
       const seasonEffects = {
-        spring: {
-          foodGrowthRate: 1.2,
-          herbGrowthRate: 1.3,
-          energyConsumption: 0.9,
-          waterConsumption: 1.0,
-          mentalRecovery: 1.1
-        },
-        summer: {
-          foodGrowthRate: 1.0,
-          herbGrowthRate: 0.8,
-          energyConsumption: 1.2,
-          waterConsumption: 1.3,
-          mentalRecovery: 0.9
-        },
-        autumn: {
-          foodGrowthRate: 1.4,
-          herbGrowthRate: 0.7,
-          energyConsumption: 1.0,
-          waterConsumption: 0.9,
-          mentalRecovery: 1.0
-        },
-        winter: {
-          foodGrowthRate: 0.6,
-          herbGrowthRate: 0.4,
-          energyConsumption: 1.3,
-          waterConsumption: 0.8,
-          mentalRecovery: 0.8
-        }
+        spring: { foodGrowthRate: 1.2, herbGrowthRate: 1.3, energyConsumption: 0.9, waterConsumption: 1.0, mentalRecovery: 1.1 },
+        summer: { foodGrowthRate: 1.0, herbGrowthRate: 0.8, energyConsumption: 1.2, waterConsumption: 1.3, mentalRecovery: 0.9 },
+        autumn: { foodGrowthRate: 1.4, herbGrowthRate: 0.7, energyConsumption: 1.0, waterConsumption: 0.9, mentalRecovery: 1.0 },
+        winter: { foodGrowthRate: 0.6, herbGrowthRate: 0.4, energyConsumption: 1.3, waterConsumption: 0.8, mentalRecovery: 0.8 }
       }
       this.season.effects = seasonEffects[seasonKey]
     },
     // 检查季节变化
     checkSeasonChange(day, seasonLength, currentSeasonIndex) {
-      // 计算前一天的季节索引
       const previousDay = day - 1
-      if (previousDay < 1) return // 游戏第一天，不检查
+      if (previousDay < 1) return
       const previousSeasonIndex = Math.floor((previousDay - 1) % (seasonLength * 4) / seasonLength)
-      // 如果季节发生变化
       if (previousSeasonIndex !== currentSeasonIndex) {
         const seasonNames = ['春季', '夏季', '秋季', '冬季']
         this.addToEventLog(`季节已变为${seasonNames[currentSeasonIndex]}`)
-        // 季节变化特殊事件
         this.triggerSeasonChangeEvent(currentSeasonIndex)
       }
     },
     // 季节变化特殊事件
     triggerSeasonChangeEvent(seasonIndex) {
-      // 根据季节触发不同的特殊事件
       switch (seasonIndex) {
-        case 0: // 春季开始
+        case 0:
           if (Math.random() < 0.4) {
             const herbAmount = Math.floor(Math.random() * 5) + 3
             this.addResource('herb', herbAmount)
             this.addToEventLog(`春季到来，你发现了${herbAmount}单位新鲜草药`)
           }
           break
-        case 1: // 夏季开始
+        case 1:
           if (Math.random() < 0.4) {
             const waterAmount = Math.floor(Math.random() * 5) + 3
             this.addResource('water', waterAmount)
             this.addToEventLog(`夏季雷雨增多，你收集了${waterAmount}单位额外的水`)
           }
           break
-        case 2: // 秋季开始
+        case 2:
           if (Math.random() < 0.4) {
             const foodAmount = Math.floor(Math.random() * 8) + 5
             this.addResource('food', foodAmount)
             this.addToEventLog(`秋季丰收，你获得了${foodAmount}单位额外的食物`)
           }
           break
-        case 3: // 冬季开始
+        case 3:
           if (Math.random() < 0.4) {
             const fuelAmount = Math.floor(Math.random() * 3) + 2
             this.addResource('fuel', fuelAmount)
@@ -992,49 +916,21 @@ export const useGameStore = defineStore('game', {
     },
     // 生成天气
     generateWeather() {
-      // 获取当前季节
       const day = this.gameTime.day
-      const seasonLength = 30 // 每个季节30天
+      const seasonLength = 30
       const seasonIndex = Math.floor((day - 1) % (seasonLength * 4) / seasonLength)
       const seasons = ['spring', 'summer', 'autumn', 'winter']
       const currentSeason = seasons[seasonIndex]
-      // 各季节天气概率
       const weatherProbabilities = {
-        spring: {
-          clear: 0.3,
-          cloudy: 0.3,
-          rainy: 0.25,
-          foggy: 0.1,
-          windy: 0.05
-        },
-        summer: {
-          clear: 0.4,
-          cloudy: 0.2,
-          rainy: 0.15,
-          hot: 0.15,
-          storm: 0.1
-        },
-        autumn: {
-          clear: 0.25,
-          cloudy: 0.3,
-          rainy: 0.2,
-          foggy: 0.15,
-          windy: 0.1
-        },
-        winter: {
-          clear: 0.2,
-          cloudy: 0.2,
-          cold: 0.3,
-          snow: 0.2,
-          windy: 0.1
-        }
+        spring: { clear: 0.3, cloudy: 0.3, rainy: 0.25, foggy: 0.1, windy: 0.05 },
+        summer: { clear: 0.4, cloudy: 0.2, rainy: 0.15, hot: 0.15, storm: 0.1 },
+        autumn: { clear: 0.25, cloudy: 0.3, rainy: 0.2, foggy: 0.15, windy: 0.1 },
+        winter: { clear: 0.2, cloudy: 0.2, cold: 0.3, snow: 0.2, windy: 0.1 }
       }
-      // 获取当前季节的天气概率
       const probabilities = weatherProbabilities[currentSeason]
-      // 随机选择天气
       let random = Math.random()
       let cumulativeProbability = 0
-      let selectedWeather = 'clear' // 默认晴天
+      let selectedWeather = 'clear'
       for (const [weather, probability] of Object.entries(probabilities)) {
         cumulativeProbability += probability
         if (random <= cumulativeProbability) {
@@ -1042,12 +938,9 @@ export const useGameStore = defineStore('game', {
           break
         }
       }
-      // 更新天气状态
       const oldWeather = this.weather.current
       this.weather.current = selectedWeather
-      // 设置天气持续时间（4-8小时）
       this.weather.duration = 4 + Math.floor(Math.random() * 5)
-      // 更新下次天气变化时间
       let nextHour = this.gameTime.hour + this.weather.duration
       let nextDay = this.gameTime.day
       while (nextHour >= 24) {
@@ -1056,9 +949,7 @@ export const useGameStore = defineStore('game', {
       }
       this.weather.nextChangeDay = nextDay
       this.weather.nextChangeHour = nextHour
-      // 只有当天气变化时才记录日志
       if (oldWeather !== selectedWeather) this.addToEventLog(`天气变为${this.getWeatherName()}，${this.getWeatherEffect()}`)
-      // 重置天气效果
       this.resetWeatherEffects()
     },
     // 获取天气名称
@@ -1079,7 +970,6 @@ export const useGameStore = defineStore('game', {
     },
     // 获取天气对建筑效果的影响
     getWeatherBuildingMultiplier() {
-      // 不同天气对建筑效果的影响
       const weatherEffects = {
         clear: { production: 1.2, waterCollection: 0.8, protection: 1.0 },
         cloudy: { production: 1.0, waterCollection: 1.0, protection: 1.0 },
@@ -1112,7 +1002,6 @@ export const useGameStore = defineStore('game', {
     },
     // 重置天气效果
     resetWeatherEffects() {
-      // 重置所有效果为默认值
       this.weather.effects = {
         gatheringEfficiency: 1.0,
         energyConsumption: 1.0,
@@ -1124,48 +1013,41 @@ export const useGameStore = defineStore('game', {
     },
     // 应用天气效果
     applyWeatherEffects() {
-      // 根据当前天气应用不同效果
       switch (this.weather.current) {
         case 'clear':
-          this.weather.effects.gatheringEfficiency = 1.1 // 采集效率+10%
+          this.weather.effects.gatheringEfficiency = 1.1
           break
         case 'cloudy':
-          this.weather.effects.energyConsumption = 0.95 // 体力消耗-5%
+          this.weather.effects.energyConsumption = 0.95
           break
         case 'rainy':
-          // 下雨时随机增加水资源
           if (Math.random() < 0.2) {
             const waterAmount = Math.floor(Math.random() * 3) + 1
             this.addResource('water', waterAmount)
           }
-          this.weather.effects.movementSpeed = 0.9 // 移动速度-10%
+          this.weather.effects.movementSpeed = 0.9
           break
         case 'heavyRain':
-          // 暴雨时更多水资源，但有洪水风险
           if (Math.random() < 0.4) {
             const waterAmount = Math.floor(Math.random() * 5) + 2
             this.addResource('water', waterAmount)
           }
-          // 洪水风险
           if (Math.random() < 0.05) {
             this.addToEventLog('暴雨引发了洪水，你损失了一些资源！')
-            // 随机损失资源
             const resources = ['food', 'wood', 'herb']
             const randomResource = resources[Math.floor(Math.random() * resources.length)]
             const lossAmount = Math.floor(Math.random() * 5) + 1
             this.consumeResource(randomResource, lossAmount)
           }
-          this.weather.effects.gatheringEfficiency = 0.7 // 采集效率-30%
-          this.weather.effects.movementSpeed = 0.7 // 移动速度-30%
-          // 极端天气成就跟踪
+          this.weather.effects.gatheringEfficiency = 0.7
+          this.weather.effects.movementSpeed = 0.7
           this.achievements.extremeWeatherSurvived = true
           break
         case 'foggy':
-          this.weather.effects.explorationEfficiency = 0.8 // 探索效率-20%
+          this.weather.effects.explorationEfficiency = 0.8
           break
         case 'windy':
-          this.weather.effects.energyConsumption = 1.1 // 体力消耗+10%
-          // 有机会发现特殊资源
+          this.weather.effects.energyConsumption = 1.1
           if (Math.random() < 0.1) {
             const specialResources = ['metal', 'parts', 'techFragment']
             const randomResource = specialResources[Math.floor(Math.random() * specialResources.length)]
@@ -1174,37 +1056,29 @@ export const useGameStore = defineStore('game', {
           }
           break
         case 'hot':
-          this.weather.effects.waterConsumption = 1.3 // 水分消耗+30%
-          // 有中暑风险
+          this.weather.effects.waterConsumption = 1.3
           if (Math.random() < 0.1 && this.resources.water < 5) {
             this.player.health -= 5
             this.addToEventLog('酷热天气导致你中暑，健康下降了！')
           }
-          // 极端天气成就跟踪
           this.achievements.extremeWeatherSurvived = true
           break
         case 'cold':
-          this.weather.effects.foodConsumption = 1.3 // 食物消耗+30%
-          // 有冻伤风险
+          this.weather.effects.foodConsumption = 1.3
           if (Math.random() < 0.1 && this.resources.food < 5) {
             this.player.health -= 5
             this.addToEventLog('寒冷天气导致你受冻，健康下降了！')
           }
-          // 极端天气成就跟踪
           this.achievements.extremeWeatherSurvived = true
           break
         case 'snow':
-          this.weather.effects.movementSpeed = 0.7 // 移动速度-30%
-          this.weather.effects.gatheringEfficiency = 0.8 // 采集效率-20%
-          this.weather.effects.foodConsumption = 1.2 // 食物消耗+20%
+          this.weather.effects.movementSpeed = 0.7
+          this.weather.effects.gatheringEfficiency = 0.8
+          this.weather.effects.foodConsumption = 1.2
           break
         case 'storm':
-          // 风暴天气有灾害风险
-          // 应用技能树中的天气抵抗效果
           if (this.skillTreeEffects.weatherResistance > 0) {
-            // 减轻负面天气效果
             const resistance = this.skillTreeEffects.weatherResistance
-            // 只有当天气效果是负面的时候才应用抵抗
             if (this.weather.effects.gatheringEfficiency < 1.0) this.weather.effects.gatheringEfficiency = Math.min(1.0, this.weather.effects.gatheringEfficiency * (1 + resistance))
             if (this.weather.effects.energyConsumption > 1.0) this.weather.effects.energyConsumption = Math.max(1.0, this.weather.effects.energyConsumption / (1 + resistance))
             if (this.weather.effects.waterConsumption > 1.0) this.weather.effects.waterConsumption = Math.max(1.0, this.weather.effects.waterConsumption / (1 + resistance))
@@ -1213,16 +1087,14 @@ export const useGameStore = defineStore('game', {
             if (this.weather.effects.explorationEfficiency < 1.0) this.weather.effects.explorationEfficiency = Math.min(1.0, this.weather.effects.explorationEfficiency * (1 + resistance))
           }
           if (Math.random() < 0.2) {
-            // 检查是否有庇护所
             const hasShelter = this.buildings.some(b => b.id === 'shelter' && b.level >= 1)
             if (hasShelter) {
               this.addToEventLog('风暴肆虐，但你的庇护所提供了保护。')
-              this.player.mental -= 5 // 仍有轻微影响
+              this.player.mental -= 5
             } else {
               this.addToEventLog('风暴肆虐，你的健康和精神都受到了严重影响！')
               this.player.health -= 10
               this.player.mental -= 15
-              // 随机损失资源
               const resources = ['food', 'water', 'wood', 'herb']
               for (let i = 0; i < 2; i++) {
                 const randomResource = resources[Math.floor(Math.random() * resources.length)]
@@ -1231,21 +1103,16 @@ export const useGameStore = defineStore('game', {
               }
             }
           }
-          // 极端天气成就跟踪
           this.achievements.extremeWeatherSurvived = true
           break
       }
     },
     // 应用建筑效果(每天)
     applyBuildingEffectsDay() {
-      // 获取季节对建筑生产的影响
       const seasonMultiplier = this.calculateSeasonBuildingMultiplier()
-      // 获取天气对建筑生产的影响
       const weatherMultiplier = this.getWeatherBuildingMultiplier()
-      // 遍历所有建筑
       for (const building of this.buildings) {
         if (!building.effects) continue
-        // 应用每日资源生产（考虑季节和天气影响）
         if (building.effects.foodPerDay) {
           const amount = Math.ceil(building.effects.foodPerDay * seasonMultiplier.production * weatherMultiplier.production)
           this.addResource('food', amount)
@@ -1256,7 +1123,6 @@ export const useGameStore = defineStore('game', {
           this.addResource('water', amount)
           this.addToEventLog(`${building.name}提供了${amount}单位水`)
         }
-        // 应用其他资源生产
         if (building.effects.woodPerDay) {
           const amount = Math.ceil(building.effects.woodPerDay * seasonMultiplier.production)
           this.addResource('wood', amount)
@@ -1277,7 +1143,6 @@ export const useGameStore = defineStore('game', {
           this.addResource('herb', amount)
           this.addToEventLog(`${building.name}提供了${amount}单位草药`)
         }
-        // 高级资源生产
         if (building.effects.medicinePerDay) {
           this.addResource('medicine', building.effects.medicinePerDay)
           this.addToEventLog(`${building.name}提供了${building.effects.medicinePerDay}单位药品`)
@@ -1296,24 +1161,18 @@ export const useGameStore = defineStore('game', {
         }
       }
     },
-    // 初始化建筑效果（在建造或加载游戏时调用）
+    // 初始化建筑效果
     initBuildingEffects() {
-      // 重置资源上限到基础值
       this.resetResourceLimits()
-      // 遍历所有建筑应用永久效果
       for (const building of this.buildings) {
         if (!building.effects) continue
-        // 应用存储上限效果
         if (building.effects.storageMultiplier) {
           for (const resource in this.resourceLimits) {
             this.resourceLimits[resource] *= building.effects.storageMultiplier
           }
         }
-        // 应用最大健康值效果
         if (building.effects.maxHealth) this.player.maxHealth += building.effects.maxHealth
-        // 应用最大体力效果
         if (building.effects.maxEnergy) this.player.maxEnergy += building.effects.maxEnergy
-        // 应用最大精神值效果
         if (building.effects.maxMental) this.player.maxMental += building.effects.maxMental
       }
     },
@@ -1334,24 +1193,19 @@ export const useGameStore = defineStore('game', {
         techFragment: 5,
       }
     },
-    // 应用建筑的小时效果（在hourlyUpdate中调用）
+    // 应用建筑的小时效果
     applyBuildingEffectsHourly() {
-      // 计算季节对建筑效果的影响
       const seasonMultiplier = this.calculateSeasonBuildingMultiplier()
-      // 遍历所有建筑
       for (const building of this.buildings) {
         if (!building.effects) continue
-        // 应用体力恢复效果（考虑季节影响）
         if (building.effects.energyRecovery) {
           const recovery = building.effects.energyRecovery * seasonMultiplier.energy
           this.player.energy = Math.min(this.player.energy + recovery, this.player.maxEnergy)
         }
-        // 应用精神恢复效果（考虑季节影响）
         if (building.effects.mentalRecovery) {
           const recovery = building.effects.mentalRecovery * seasonMultiplier.mental
           this.player.mental = Math.min(this.player.mental + recovery, this.player.maxMental)
         }
-        // 应用健康恢复效果
         if (building.effects.healthRecovery) {
           const recovery = building.effects.healthRecovery * seasonMultiplier.health
           this.player.health = Math.min(this.player.health + recovery, this.player.maxHealth)
@@ -1363,151 +1217,38 @@ export const useGameStore = defineStore('game', {
       const day = this.gameTime.day
       const seasonLength = this.season.seasonLength
       const seasonIndex = Math.floor((day - 1) % (seasonLength * 4) / seasonLength)
-      // 季节对建筑效果的影响
       const seasonMultipliers = [
-        // 春季 - 适中
         { energy: 1.1, mental: 1.2, health: 1.1, production: 1.2 },
-        // 夏季 - 体力消耗高，生产高
         { energy: 0.9, mental: 1.0, health: 1.0, production: 1.3 },
-        // 秋季 - 生产最高
         { energy: 1.0, mental: 0.9, health: 1.0, production: 1.4 },
-        // 冬季 - 各方面都受限
         { energy: 0.8, mental: 0.7, health: 0.9, production: 0.7 }
       ]
       return seasonMultipliers[seasonIndex]
     },
     // 触发随机事件
     triggerRandomEvent() {
-      // 基础事件
       const basicEvents = [
-        {
-          id: 'rain', name: '下雨了', effect: () => {
-            this.addResource('water', 10)
-            this.addToEventLog('下雨了，你收集了一些雨水')
-          },
-          weight: 10 // 权重，决定事件触发概率
-        },
-        {
-          id: 'animal', name: '野生动物', effect: () => {
-            if (this.skills.combat > 2) {
-              this.addResource('food', 15)
-              this.addToEventLog('你成功猎到了一只野兔，获得了食物')
-            } else {
-              this.addToEventLog('你看到一只野兔，但它跑得太快了')
-            }
-          },
-          weight: 8
-        },
-        {
-          id: 'stranger', name: '陌生人', effect: () => {
-            this.addToEventLog('你遇到了一个陌生人，他给了你一些建议就离开了')
-            this.addSkillExp('survival', 2)
-          },
-          weight: 6
-        },
-        {
-          id: 'wild_fruits', name: '野果丰收', effect: () => {
-            this.addResource('food', 8)
-            this.addToEventLog('你发现了一片野果丛，收获了不少食物')
-          },
-          weight: 10
-        },
-        {
-          id: 'herb_discovery', name: '草药发现', effect: () => {
-            this.addResource('herb', 5)
-            this.addToEventLog('你发现了一片罕见的草药，这对制作药品很有帮助')
-          },
-          weight: 7
-        },
+        { id: 'rain', name: '下雨了', effect: () => { this.addResource('water', 10); this.addToEventLog('下雨了，你收集了一些雨水') }, weight: 10 },
+        { id: 'animal', name: '野生动物', effect: () => { if (this.skills.combat > 2) { this.addResource('food', 15); this.addToEventLog('你成功猎到了一只野兔，获得了食物') } else { this.addToEventLog('你看到一只野兔，但它跑得太快了') } }, weight: 8 },
+        { id: 'stranger', name: '陌生人', effect: () => { this.addToEventLog('你遇到了一个陌生人，他给了你一些建议就离开了'); this.addSkillExp('survival', 2) }, weight: 6 },
+        { id: 'wild_fruits', name: '野果丰收', effect: () => { this.addResource('food', 8); this.addToEventLog('你发现了一片野果丛，收获了不少食物') }, weight: 10 },
+        { id: 'herb_discovery', name: '草药发现', effect: () => { this.addResource('herb', 5); this.addToEventLog('你发现了一片罕见的草药，这对制作药品很有帮助') }, weight: 7 },
       ]
-      // 危险事件
       const dangerEvents = [
-        {
-          id: 'storm', name: '暴风雨', effect: () => {
-            // 检查是否有庇护所
-            const hasShelter = this.buildings.some(b => b.id === 'shelter' && b.level >= 1)
-            if (hasShelter) {
-              this.addToEventLog('一场暴风雨来袭，但你的庇护所提供了良好的保护')
-              this.player.mental -= 5 // 仍有轻微影响
-            } else {
-              this.addToEventLog('一场暴风雨来袭，你被淋得浑身湿透，精神和健康都受到了影响')
-              this.player.health -= 10
-              this.player.mental -= 15
-            }
-          },
-          weight: 5,
-          minDay: 3 // 最早在第3天触发
-        },
-        {
-          id: 'illness', name: '疾病', effect: () => {
-            if (this.resources.medicine > 0) {
-              this.consumeResource('medicine', 1)
-              this.addToEventLog('你感到身体不适，但幸好有药品治疗，很快就恢复了')
-            } else {
-              this.player.health -= 15
-              this.player.energy -= 20
-              this.addToEventLog('你生病了，没有药品治疗，健康状况恶化')
-            }
-          },
-          weight: 4,
-          minDay: 5
-        },
-        {
-          id: 'predator', name: '掠食者', effect: () => {
-            if (this.skills.combat >= 3) {
-              this.addToEventLog('一只野兽袭击了你，但你成功击退了它，还获得了一些食物')
-              this.addResource('food', 20)
-              this.addSkillExp('combat', 2)
-            } else {
-              this.player.health -= 20
-              this.addToEventLog('一只野兽袭击了你，你勉强逃脱，但受了伤')
-            }
-          },
-          weight: 3,
-          minDay: 7
-        },
+        { id: 'storm', name: '暴风雨', effect: () => { const hasShelter = this.buildings.some(b => b.id === 'shelter' && b.level >= 1); if (hasShelter) { this.addToEventLog('一场暴风雨来袭，但你的庇护所提供了良好的保护'); this.player.mental -= 5 } else { this.addToEventLog('一场暴风雨来袭，你被淋得浑身湿透，精神和健康都受到了影响'); this.player.health -= 10; this.player.mental -= 15 } }, weight: 5, minDay: 3 },
+        { id: 'illness', name: '疾病', effect: () => { if (this.resources.medicine > 0) { this.consumeResource('medicine', 1); this.addToEventLog('你感到身体不适，但幸好有药品治疗，很快就恢复了') } else { this.player.health -= 15; this.player.energy -= 20; this.addToEventLog('你生病了，没有药品治疗，健康状况恶化') } }, weight: 4, minDay: 5 },
+        { id: 'predator', name: '掠食者', effect: () => { if (this.skills.combat >= 3) { this.addToEventLog('一只野兽袭击了你，但你成功击退了它，还获得了一些食物'); this.addResource('food', 20); this.addSkillExp('combat', 2) } else { this.player.health -= 20; this.addToEventLog('一只野兽袭击了你，你勉强逃脱，但受了伤') } }, weight: 3, minDay: 7 },
       ]
-
-      // 幸运事件
       const luckyEvents = [
-        {
-          id: 'abandoned_supplies', name: '废弃物资', effect: () => {
-            this.addResource('food', 10)
-            this.addResource('water', 10)
-            this.addResource('medicine', 1)
-            this.addToEventLog('你发现了一些废弃的物资，获得了食物、水和药品')
-          },
-          weight: 3,
-          minDay: 4
-        },
-        {
-          id: 'tech_discovery', name: '科技发现', effect: () => {
-            this.addResource('techFragment', 2)
-            this.addToEventLog('你发现了一些古老的科技碎片，这对研究很有帮助')
-          },
-          weight: 2,
-          minDay: 10
-        },
-        {
-          id: 'ancient_cache', name: '古代宝藏', effect: () => {
-            this.addResource('ancientRelic', 1)
-            this.addResource('metal', 15)
-            this.addResource('parts', 3)
-            this.addToEventLog('你发现了一个古代文明的宝藏，获得了珍贵的资源')
-          },
-          weight: 1,
-          minDay: 15
-        },
+        { id: 'abandoned_supplies', name: '废弃物资', effect: () => { this.addResource('food', 10); this.addResource('water', 10); this.addResource('medicine', 1); this.addToEventLog('你发现了一些废弃的物资，获得了食物、水和药品') }, weight: 3, minDay: 4 },
+        { id: 'tech_discovery', name: '科技发现', effect: () => { this.addResource('techFragment', 2); this.addToEventLog('你发现了一些古老的科技碎片，这对研究很有帮助') }, weight: 2, minDay: 10 },
+        { id: 'ancient_cache', name: '古代宝藏', effect: () => { this.addResource('ancientRelic', 1); this.addResource('metal', 15); this.addResource('parts', 3); this.addToEventLog('你发现了一个古代文明的宝藏，获得了珍贵的资源') }, weight: 1, minDay: 15 },
       ]
-      // 根据游戏天数选择可用事件
       let availableEvents = [...basicEvents]
       if (this.gameTime.day >= 3) availableEvents = availableEvents.concat(dangerEvents.filter(e => this.gameTime.day >= (e.minDay || 0)))
       if (this.gameTime.day >= 4) availableEvents = availableEvents.concat(luckyEvents.filter(e => this.gameTime.day >= (e.minDay || 0)))
-      // 计算总权重
       const totalWeight = availableEvents.reduce((sum, event) => sum + (event.weight || 1), 0)
-      // 25%概率触发随机事件
       if (Math.random() < 0.25) {
-        // 根据权重随机选择事件
         let randomWeight = Math.random() * totalWeight
         let selectedEvent = null
         for (const event of availableEvents) {
@@ -1529,8 +1270,25 @@ export const useGameStore = defineStore('game', {
     addToEventLog(message) {
       const timestamp = `${this.gameTime.day}天 ${this.gameTime.hour}:${this.gameTime.minute}`
       this.eventLog.unshift({ timestamp, message })
-      // 限制日志长度
       if (this.eventLog.length > 100) this.eventLog.pop()
     },
   },
+  persist: {
+    // 使用 pinia-plugin-persistedstate 的默认配置
+    key: __APP_NAME__, // 存储的键名
+    storage: localStorage, // 使用 localStorage
+    serializer: {
+      serialize: (state) => {
+        const filteredState = omit(state, ['eventLog', 'currentActivities'])
+        const encryptedData = encryptData(filteredState)
+        const encodedAppName = btoa(`+++${__APP_NAME__}`)
+        return `${encryptedData}${encodedAppName}`
+      },
+      deserialize: (value) => {
+        const encodedAppName = btoa(`+++${__APP_NAME__}`)
+        const saveData = value.replace(encodedAppName, '');
+        return decryptData(saveData)
+      }
+    }
+  }
 })
