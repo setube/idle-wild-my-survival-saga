@@ -6,13 +6,18 @@ on:
 
 jobs:
   check:
+    name: 类型检查与测试
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - name: 检出代码
+        uses: actions/checkout@v7
+      - name: 安装 Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      - run: bun run check
+      - name: 安装依赖
+        run: bun install --frozen-lockfile
+      - name: 类型检查、运行测试并构建
+        run: bun run check

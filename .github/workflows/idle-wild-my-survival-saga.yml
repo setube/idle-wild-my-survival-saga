@@ -1,4 +1,4 @@
-name: 自动化创建Docker镜像
+name: 构建并发布 Docker 镜像
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    name: 构建并发布容器镜像
     runs-on: ubuntu-latest
     permissions:
       contents: read
