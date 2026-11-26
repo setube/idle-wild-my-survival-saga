@@ -37,8 +37,6 @@ jobs:
 
       - name: 配置 GitHub Pages
         uses: actions/configure-pages@v6
-        with:
-          static_site_generator: custom
 
       - name: 上传网站构建产物
         uses: actions/upload-pages-artifact@v5
