@@ -1,13 +1,14 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { eventLibrary, eventTypes } from '../plugins/eventLibrary'
 import { ElMessageBox } from 'element-plus'
+import type { GameEvent, EventOption } from '../types/game'
 
 const gameStore = useGameStore()
 
 // 当前活跃事件
-const activeEvent = ref(null)
+const activeEvent = ref<GameEvent | null>(null)
 // 控制事件面板显示
 const showEventPanel = ref(false)
 
@@ -56,7 +57,7 @@ const triggerRandomEvent = () => {
 }
 
 // 选择事件选项
-const selectOption = async (option) => {
+const selectOption = async (option: EventOption) => {
   if (!activeEvent.value) return
   // 检查选项条件
   if (option.condition && !option.condition(gameStore)) {
@@ -113,7 +114,7 @@ onMounted(() => {
     </div>
     <el-dialog v-model="showEventPanel"
       :title="activeEvent ? `${eventTypes[activeEvent.type].icon} ${activeEvent.title}` : '事件'" width="412px"
-      :close-on-click-modal="false" :show-close="false" custom-class="event-dialog">
+      :close-on-click-modal="false" :show-close="false" class="event-dialog">
       <div v-if="activeEvent" class="event-panel" :class="`event-type-${activeEvent.type}`">
         <div class="event-header">
           <span class="event-type-label">{{ eventTypes[activeEvent.type].title }}</span>

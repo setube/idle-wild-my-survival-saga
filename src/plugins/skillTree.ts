@@ -1,4 +1,6 @@
-export const skillTree = {
+import type { SkillBranch, SkillKey, SkillSet } from '../types/game'
+
+export const skillTree: Record<Exclude<SkillKey, 'combat'>, SkillBranch> = {
   // 采集技能
   gathering: {
     name: '采集',
@@ -231,7 +233,7 @@ export const skillTree = {
   }
 }
 
-export const skills = {
+export const skills: SkillSet = {
   // 采集
   gathering: {
     name: 'gathering',

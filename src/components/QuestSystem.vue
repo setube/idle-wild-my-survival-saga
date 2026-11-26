@@ -1,14 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { Quest } from '../types/game'
 
 const gameStore = useGameStore()
 // 当前活动标签页
-const activeTab = ref('available')
+const activeTab = ref<string | number>('available')
 
 // 任务列表
-const questList = [
+const questList: Quest[] = [
   {
     id: 'survival_basics',
     name: '生存基础',
@@ -244,8 +245,8 @@ const completedQuests = computed(() => {
 })
 
 // 获取难度文本
-const getDifficultyText = (difficulty) => {
-  const difficultyTexts = {
+const getDifficultyText = (difficulty: number) => {
+  const difficultyTexts: Record<number, string> = {
     1: '简单',
     2: '普通',
     3: '困难',
@@ -256,7 +257,7 @@ const getDifficultyText = (difficulty) => {
 }
 
 // 格式化时间限制
-const formatTimeLimit = (hours) => {
+const formatTimeLimit = (hours: number) => {
   if (hours >= 24) {
     const days = Math.floor(hours / 24)
     const remainingHours = hours % 24
@@ -266,7 +267,7 @@ const formatTimeLimit = (hours) => {
 }
 
 // 获取任务进度值
-const getProgressValue = (quest, resource) => {
+const getProgressValue = (quest: Quest, resource: string) => {
   // 根据不同的资源类型获取进度
   if (resource === 'explorationCompleted') return gameStore.player.explorationCompleted || 0
   else if (resource === 'days') return gameStore.player.days || 0
@@ -275,19 +276,19 @@ const getProgressValue = (quest, resource) => {
 }
 
 // 获取任务进度百分比
-const getProgressPercentage = (quest, resource) => {
+const getProgressPercentage = (quest: Quest, resource: string) => {
   const current = getProgressValue(quest, resource)
   const target = quest.objectives[resource]
   return Math.min(Math.floor((current / target) * 100), 100)
 }
 
 // 检查目标是否完成
-const isObjectiveComplete = (quest, resource) => {
+const isObjectiveComplete = (quest: Quest, resource: string) => {
   return getProgressValue(quest, resource) >= quest.objectives[resource]
 }
 
 // 检查任务是否可以完成
-const canCompleteQuest = (quest) => {
+const canCompleteQuest = (quest: Quest) => {
   // 检查所有目标是否都已完成
   for (const [resource, amount] of Object.entries(quest.objectives)) {
     if (getProgressValue(quest, resource) < amount) return false
@@ -296,7 +297,7 @@ const canCompleteQuest = (quest) => {
 }
 
 // 检查时间是否快要用完
-const isTimeRunningOut = (quest) => {
+const isTimeRunningOut = (quest: Quest) => {
   if (!quest.timeLimit || !quest.acceptedAt) return false
   const currentTime = gameStore.gameTime.timestamp
   const endTime = quest.acceptedAt + (quest.timeLimit * 60 * 60 * 1000) // 转换为毫秒
@@ -306,7 +307,7 @@ const isTimeRunningOut = (quest) => {
 }
 
 // 格式化剩余时间
-const formatRemainingTime = (quest) => {
+const formatRemainingTime = (quest: Quest) => {
   if (!quest.timeLimit || !quest.acceptedAt) return '无限制'
   const currentTime = gameStore.gameTime.timestamp
   const endTime = quest.acceptedAt + (quest.timeLimit * 60 * 60 * 1000) // 转换为毫秒
@@ -319,7 +320,7 @@ const formatRemainingTime = (quest) => {
 }
 
 // 格式化完成时间
-const formatCompletionTime = (timestamp) => {
+const formatCompletionTime = (timestamp?: number) => {
   if (!timestamp) return '未知'
   const date = new Date(timestamp)
   const gameDay = Math.floor((timestamp - gameStore.gameTime.startTime) / (24 * 60 * 60 * 1000)) + 1
@@ -327,7 +328,7 @@ const formatCompletionTime = (timestamp) => {
 }
 
 // 接受任务
-const acceptQuest = (quest) => {
+const acceptQuest = (quest: Quest) => {
   // 复制任务并添加接受时间
   const acceptedQuest = {
     ...quest,
@@ -349,7 +350,7 @@ const acceptQuest = (quest) => {
 }
 
 // 完成任务
-const completeQuest = (quest) => {
+const completeQuest = (quest: Quest) => {
   if (!canCompleteQuest(quest)) {
     ElMessage.warning('任务目标尚未完成')
     return
@@ -367,10 +368,11 @@ const completeQuest = (quest) => {
   }
   // 检查资源要求
   for (const [resource, amount] of Object.entries(quest.objectives)) {
-    gameStore.resources[resource] -= amount
+    if (Object.hasOwn(gameStore.resources, resource)) gameStore.resources[resource] -= amount
   }
   // 从进行中列表移除任务
-  const completedQuest = gameStore.activeQuests.splice(questIndex, 1)[0]
+  gameStore.activeQuests.splice(questIndex, 1)
+  const completedQuest = newCompletedQuest
   // 添加到已完成列表
   gameStore.completedQuests.push(completedQuest)
   // 处理各种类型的奖励
@@ -400,7 +402,7 @@ const completeQuest = (quest) => {
 }
 
 // 放弃任务
-const abandonQuest = (quest) => {
+const abandonQuest = (quest: Quest) => {
   ElMessageBox.confirm('确定要放弃这个任务吗？你将失去所有进度。', '放弃任务', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
@@ -485,7 +487,7 @@ const abandonQuest = (quest) => {
                         {{ getProgressValue(quest, resource) }}/{{ amount }}
                       </span>
                       <el-progress :percentage="getProgressPercentage(quest, resource)"
-                        :status="isObjectiveComplete(quest, resource) ? 'success' : ''"></el-progress>
+                        :status="isObjectiveComplete(quest, resource) ? 'success' : undefined"></el-progress>
                     </li>
                   </ul>
                 </div>

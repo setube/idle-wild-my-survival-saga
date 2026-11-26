@@ -1,4 +1,6 @@
-export const weatherTypes = {
+import type { GameContext, WeatherDefinition } from '../types/game'
+
+export const weatherTypes: Record<string, WeatherDefinition> = {
   // 基础天气
   clear: {
     name: '晴朗',
@@ -348,8 +350,8 @@ export const weatherTypes = {
 }
 
 // 根据季节获取天气概率分布
-export const getWeatherProbabilities = (season) => {
-  const probabilities = {}
+export const getWeatherProbabilities = (season: string) => {
+  const probabilities: Record<string, number> = {}
   for (const [weatherType, data] of Object.entries(weatherTypes)) {
     // 基础概率 * 季节修正
     const seasonModifier = data.seasonModifiers
@@ -369,7 +371,7 @@ export const getWeatherProbabilities = (season) => {
 }
 
 // 随机选择天气类型
-export const selectRandomWeather = (season, currentWeather = null) => {
+export const selectRandomWeather = (season: string, currentWeather: string | null = null) => {
   const probabilities = getWeatherProbabilities(season)
   // 如果提供了当前天气，稍微降低再次选择相同天气的概率
   if (currentWeather && probabilities[currentWeather]) {
@@ -397,7 +399,7 @@ export const selectRandomWeather = (season, currentWeather = null) => {
 }
 
 // 获取天气持续时间
-export const getWeatherDuration = (weatherType) => {
+export const getWeatherDuration = (weatherType: string) => {
   const weather = weatherTypes[weatherType]
   if (!weather || !weather.duration) return 6 // 默认6小时
   const { min, max } = weather.duration
@@ -405,7 +407,7 @@ export const getWeatherDuration = (weatherType) => {
 }
 
 // 处理天气特殊事件
-export const processWeatherEvents = (store, weatherType) => {
+export const processWeatherEvents = (store: GameContext, weatherType: string) => {
   const weather = weatherTypes[weatherType]
   if (!weather || !weather.events) return
   for (const event of weather.events) {

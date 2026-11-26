@@ -1,4 +1,6 @@
-export const merchants = [
+import type { Merchant } from '../types/game'
+
+export const merchants: Merchant[] = [
   {
     id: 'wandering_trader',
     name: '流浪商人',

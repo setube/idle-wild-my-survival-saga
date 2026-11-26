@@ -1,7 +1,7 @@
 import CryptoJS from 'crypto-js'
 
 // 数据加密
-export const encryptData = (data) => {
+export const encryptData = (data: unknown) => {
   try {
     const jsonStr = JSON.stringify(data)
     return CryptoJS.AES.encrypt(jsonStr, __APP_NAME__).toString()
@@ -12,7 +12,7 @@ export const encryptData = (data) => {
 }
 
 // 数据解密
-export const decryptData = (encryptedData) => {
+export const decryptData = (encryptedData: string): unknown => {
   try {
     const bytes = CryptoJS.AES.decrypt(encryptedData, __APP_NAME__)
     const decryptedStr = bytes.toString(CryptoJS.enc.Utf8)

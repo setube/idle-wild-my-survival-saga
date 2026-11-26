@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import ResourcePanel from './ResourcePanel.vue'
@@ -16,18 +16,26 @@ import TradingSystem from './TradingSystem.vue'
 import QuestSystem from './QuestSystem.vue'
 import SkillTreeSystem from './SkillTreeSystem.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { UploadRequestOptions } from 'element-plus'
 import { saveAs } from 'file-saver'
+import { getEnergyRecovery } from '../plugins/energyMechanics'
 
 const gameStore = useGameStore()
-const gameTimerId = ref(null)
+const gameTimerId = ref<ReturnType<typeof setInterval> | null>(null)
 
 const gameState = computed(() => gameStore.gameState)
+const isGameOver = computed(() => gameStore.gameState === 'gameover')
+const playerDays = computed(() => gameStore.player.days)
+const handleGameOverVisibilityChange = (visible: boolean) => {
+	gameStore.gameState = visible ? 'gameover' : 'playing'
+}
+const restartFromGameOver = () => gameStore.initGame()
 
 // 中央面板标签页
-const centerPanelTab = ref('activity')
+const centerPanelTab = ref<string | number>('activity')
 
 // 推进游戏时间
-const advanceTime = (minutes) => {
+const advanceTime = (minutes: number) => {
 	gameStore.gameTime.minute += minutes
 	// 处理时间进位
 	while (gameStore.gameTime.minute >= 60) {
@@ -71,6 +79,8 @@ const applyBuildingEffectsHourly = () => {
 	const seasonMultiplier = calculateSeasonBuildingMultiplier()
 	// 获取天气对建筑生产的影响
 	const weatherMultiplier = getWeatherBuildingMultiplier()
+	const { building: buildingEnergyRecovery } = getEnergyRecovery(gameStore.$state)
+	gameStore.player.energy = Math.min(gameStore.player.energy + buildingEnergyRecovery, gameStore.player.maxEnergy)
 	// 遍历所有建筑
 	for (const building of gameStore.buildings) {
 		if (!building.effects) continue
@@ -85,11 +95,6 @@ const applyBuildingEffectsHourly = () => {
 			gameStore.addResource('water', amount)
 			gameStore.addToEventLog(`${building.name}提供了${amount}单位水`)
 		}
-		// 应用体力恢复效果（考虑季节影响）
-		if (building.effects.energyRecovery) {
-			const recovery = building.effects.energyRecovery * seasonMultiplier.energy
-			gameStore.player.energy = Math.min(gameStore.player.energy + recovery, gameStore.player.maxEnergy)
-		}
 		// 应用健康恢复效果
 		if (building.effects.healthRecovery) {
 			const recovery = building.effects.healthRecovery * seasonMultiplier.health
@@ -101,7 +106,7 @@ const applyBuildingEffectsHourly = () => {
 // 获取天气对建筑效果的影响
 const getWeatherBuildingMultiplier = () => {
 	// 不同天气对建筑效果的影响
-	const weatherEffects = {
+	const weatherEffects: Record<string, { production: number; waterCollection: number; protection: number }> = {
 		clear: { production: 1.2, waterCollection: 0.8, protection: 1.0 },
 		cloudy: { production: 1.0, waterCollection: 1.0, protection: 1.0 },
 		rainy: { production: 0.9, waterCollection: 1.5, protection: 0.9 },
@@ -165,7 +170,7 @@ const applyBuildingEffectsDay = () => {
 }
 
 // 更新季节效果
-const updateSeasonEffects = (seasonKey) => {
+const updateSeasonEffects = (seasonKey: 'spring' | 'summer' | 'autumn' | 'winter') => {
 	const seasonEffects = {
 		spring: {
 			foodGrowthRate: 1.2,
@@ -200,7 +205,7 @@ const applySeasonalEffects = () => {
 	const day = gameStore.gameTime.day
 	const seasonLength = gameStore.season.seasonLength
 	const seasonIndex = Math.floor((day - 1) % (seasonLength * 4) / seasonLength)
-	const seasonKeys = ['spring', 'summer', 'autumn', 'winter']
+	const seasonKeys = ['spring', 'summer', 'autumn', 'winter'] as const
 	const currentSeasonKey = seasonKeys[seasonIndex]
 	// 更新季节效果
 	updateSeasonEffects(currentSeasonKey)
@@ -265,7 +270,7 @@ const applySeasonalEffects = () => {
 }
 
 // 检查季节变化
-const checkSeasonChange = (day, seasonLength, currentSeasonIndex) => {
+const checkSeasonChange = (day: number, seasonLength: number, currentSeasonIndex: number) => {
 	// 计算前一天的季节索引
 	const previousDay = day - 1
 	if (previousDay < 1) return // 游戏第一天，不检查
@@ -280,7 +285,7 @@ const checkSeasonChange = (day, seasonLength, currentSeasonIndex) => {
 }
 
 // 季节变化特殊事件
-const triggerSeasonChangeEvent = (seasonIndex) => {
+const triggerSeasonChangeEvent = (seasonIndex: number) => {
 	// 根据季节触发不同的特殊事件
 	switch (seasonIndex) {
 		case 0: // 春季开始
@@ -354,14 +359,10 @@ const hourlyUpdate = () => {
 	gameStore.consumeResource('food', foodConsumption)
 	// 应用建筑的小时效果
 	applyBuildingEffectsHourly()
-	// 根据时间段自然恢复体力
-	let baseEnergyRecovery = 0
-	// 夜间休息恢复更多体力
-	baseEnergyRecovery = gameStore.gameTime.hour >= 22 || gameStore.gameTime.hour <= 6 ? 0.05 : 0.01
-	// 应用天气对体力恢复的影响
-	if (gameStore.weather.current === 'hot' || gameStore.weather.current === 'cold') baseEnergyRecovery *= 0.8 // 极端天气减少体力恢复
+	// 与体力说明共用同一恢复公式。
+	const { natural: baseEnergyRecovery } = getEnergyRecovery(gameStore.$state)
 	// 应用基础体力恢复
-	gameStore.player.energy = Math.min(gameStore.player.energy + gameStore.player.maxEnergy * baseEnergyRecovery, gameStore.player.maxEnergy)
+	gameStore.player.energy = Math.min(gameStore.player.energy + baseEnergyRecovery, gameStore.player.maxEnergy)
 	// 应用技能中的健康恢复效果
 	if (gameStore.skillTreeEffects.healthRecovery > 0) {
 		const healthRecovery = Math.floor(gameStore.player.maxHealth * 0.01 * gameStore.skillTreeEffects.healthRecovery)
@@ -576,33 +577,35 @@ const togglePause = () => {
 	}
 }
 
-// 导出存档
+// 导出前保存当前进度。
 const download = () => {
 	try {
+		gameStore.saveGame()
+		const data = localStorage.getItem(__APP_NAME__)
+		if (!data) throw new Error('没有可导出的存档')
 		saveAs(
-			new Blob([localStorage.getItem(__APP_NAME__)], { type: 'application/json' }),
+			new Blob([data], { type: 'application/json' }),
 			`${__APP_TITLE__}存档数据-${new Date().toISOString().slice(0, 10)}-${Date.now()}.json`
 		)
 		ElMessage.success('存档已导出')
 	} catch (error) {
-		ElMessage.error('存档导出失败：' + error.message)
-		gameStore.addToEventLog('存档导出失败：' + error.message)
+		const message = error instanceof Error ? error.message : String(error)
+		ElMessage.error('存档导出失败：' + message)
+		gameStore.addToEventLog('存档导出失败：' + message)
 	}
 }
 
-// 导入存档
-const upload = (data) => {
-	const file = data.file
-	const reader = new FileReader()
-	reader.onload = (e) => {
-		try {
-			localStorage.setItem(__APP_NAME__, e.target.result)
-			location.reload()
-		} catch (error) {
-			ElMessage.error('存档导入失败：' + error.message)
-		}
+// 文件导入和本地读取共用校验流程，失败时保留当前进度。
+const upload = async ({ file }: UploadRequestOptions) => {
+	try {
+		const data = await file.text()
+		if (!gameStore.importGame(data)) throw new Error('存档格式或数据无效')
+		ElMessage.success('存档已导入')
+		location.reload()
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		ElMessage.error('存档导入失败：' + message)
 	}
-	reader.readAsText(file);
 }
 
 // 切换暗黑模式
@@ -711,7 +714,7 @@ onUnmounted(() => {
 						<ExplorationPanel />
 					</el-tab-pane>
 					<el-tab-pane label="交易" name="trading">
-						<TradingSystem :key="centerPanelTab == 'trading'" />
+						<TradingSystem :key="centerPanelTab === 'trading' ? 'trading-active' : 'trading-inactive'" />
 					</el-tab-pane>
 					<el-tab-pane label="任务" name="quests">
 						<QuestSystem />
@@ -731,14 +734,14 @@ onUnmounted(() => {
 				<EventLog />
 			</div>
 		</div>
-		<el-dialog :model-value="gameStore.gameState === 'gameover'"
-			@update:model-value="gameStore.gameState = $event ? 'gameover' : 'playing'" title="游戏结束" width="30%"
+		<el-dialog :model-value="isGameOver"
+			@update:model-value="handleGameOverVisibilityChange" title="游戏结束" width="30%"
 			:close-on-click-modal="false" :show-close="false">
 			<span>你没能在这个严酷的世界生存下来...</span>
-			<span>生存天数: {{ gameStore.player.days }}</span>
+			<span>生存天数: {{ playerDays }}</span>
 			<template #footer>
 				<span class="dialog-footer">
-					<el-button @click="gameStore.initGame">重新开始</el-button>
+					<el-button @click="restartFromGameOver">重新开始</el-button>
 				</span>
 			</template>
 		</el-dialog>

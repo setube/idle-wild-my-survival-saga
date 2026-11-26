@@ -1,19 +1,22 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onUnmounted, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { technologies } from '../plugins/recipes'
 
+import type { ActivityId, ResearchActivity, Technology, TimerHandle } from '../types/game'
+
 const gameStore = useGameStore()
 
 // 当前选中的科技
-const selectedTech = ref(null)
+const selectedTech = ref<string | null>(null)
+const selectedTechnology = computed(() => technologies.find(tech => tech.id === selectedTech.value))
 // 研究计时器
-const researchTimer = ref(null)
+const researchTimer = ref<TimerHandle | null>(null)
 // 活动状态响应式数据
-const researchProgress = ref({})
-const researchRemainingTime = ref({})
+const researchProgress = ref<Record<ActivityId, number>>({})
+const researchRemainingTime = ref<Record<ActivityId, string>>({})
 // 正在研究的科技ID
-const researchingTech = ref([])
+const researchingTech = ref<string[]>([])
 
 // 确保gameStore中有researched数组
 if (!gameStore.researched) {
@@ -58,7 +61,7 @@ const canResearch = computed(() => {
 })
 
 // 获取科技成本文本
-const getTechCost = (tech) => {
+const getTechCost = (tech: Technology) => {
   if (!tech.cost || Object.keys(tech.cost).length === 0) return '无消耗'
   return Object.entries(tech.cost).map(([resource, amount]) => {
     return `${gameStore.getResourceName(resource)}x${amount}`
@@ -69,13 +72,15 @@ const getTechCost = (tech) => {
 const researchTech = () => {
   if (!selectedTech.value || !canResearch.value) return
   const tech = technologies.find(t => t.id === selectedTech.value)
+  if (!tech) return
   let activityDuration = tech.researchTime
   if (gameStore.skillTreeEffects.researchSpeed > 0) {
     activityDuration = Math.floor(activityDuration / (1 + gameStore.skillTreeEffects.researchSpeed))
   }
   activityDuration = Math.max(1, activityDuration)
   // 创建研究活动
-  const researchActivity = {
+  const researchActivity: ResearchActivity = {
+    startTime: Date.now(),
     id: `research_${tech.id}_${Date.now()}`,
     recipeId: `research_${tech.id}`,
     name: `${tech.name}`,
@@ -113,7 +118,7 @@ const researchTech = () => {
 }
 
 // 完成研究
-const completeResearch = (activityId, tech) => {
+const completeResearch = (activityId: ActivityId, tech: Technology) => {
   // 从当前活动中移除
   const activityIndex = gameStore.researchActivities.findIndex(a => a.id === activityId)
   if (activityIndex === -1) return false
@@ -129,7 +134,7 @@ const completeResearch = (activityId, tech) => {
   gameStore.addToEventLog(`你成功研究了${tech.name}！`)
   gameStore.saveGame()
   // 检查是否有等待中的研究活动
-  const nextResearch = gameStore.pendingResearchActivities.find(a => a.id.startsWith('research_'))
+  const nextResearch = gameStore.pendingResearchActivities.find(a => String(a.id).startsWith('research_'))
   if (nextResearch) {
     const nextTech = technologies.find(t => t.id === nextResearch.tech)
     if (nextTech) {
@@ -157,7 +162,7 @@ const completeResearch = (activityId, tech) => {
 }
 
 // 取消研究活动
-const cancelResearch = (activityId) => {
+const cancelResearch = (activityId: ActivityId) => {
   // 先检查当前活动
   const currentIndex = gameStore.researchActivities.findIndex(a => a.id === activityId)
   if (currentIndex !== -1) {
@@ -182,7 +187,7 @@ const cancelResearch = (activityId) => {
       gameStore.addToEventLog(`取消了研究${tech.name}并返还了资源`)
       gameStore.saveGame()
       // 检查并启动等待队列中的下一个研究活动
-      const nextResearch = gameStore.pendingResearchActivities.find(a => a.id.startsWith('research_'))
+      const nextResearch = gameStore.pendingResearchActivities.find(a => String(a.id).startsWith('research_'))
       if (nextResearch) {
         const nextTech = technologies.find(t => t.id === nextResearch.tech)
         if (nextTech) {
@@ -237,7 +242,7 @@ const getResearchSkillEffects = () => {
 }
 
 // 获取科技解锁内容文本
-const getTechUnlocks = (tech) => {
+const getTechUnlocks = (tech: Technology) => {
   if (!tech.unlocks || tech.unlocks.length === 0) return '无特殊解锁'
   const unlockTexts = []
   for (const unlockId of tech.unlocks) {
@@ -257,7 +262,7 @@ const getTechUnlocks = (tech) => {
 }
 
 // 获取活动剩余时间（格式化为分钟:秒）
-const getActivityRemainingTime = (activity) => {
+const getActivityRemainingTime = (activity: ResearchActivity) => {
   if (researchRemainingTime.value[activity.id] !== undefined) return researchRemainingTime.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -267,7 +272,7 @@ const getActivityRemainingTime = (activity) => {
 }
 
 // 获取活动进度百分比（0-100）
-const getActivityProgress = (activity) => {
+const getActivityProgress = (activity: ResearchActivity) => {
   if (researchProgress.value[activity.id] !== undefined) return researchProgress.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -277,14 +282,14 @@ const getActivityProgress = (activity) => {
 // 更新所有研究活动的状态
 const updateResearchStatus = () => {
   gameStore.researchActivities.forEach(activity => {
-    if (!activity.id.startsWith('research_')) return
+    if (!String(activity.id).startsWith('research_')) return
     const now = Date.now()
     const elapsed = now - activity.startTime
     const progress = Math.min(100, (elapsed / activity.duration) * 100)
     // 检查是否已完成
     if (progress >= 100) {
       const tech = technologies.find(t => t.id === activity.tech)
-      completeResearch(activity.id, tech)
+      if (tech) completeResearch(activity.id, tech)
       return
     }
     researchProgress.value[activity.id] = progress
@@ -296,19 +301,19 @@ const updateResearchStatus = () => {
 }
 
 // 研究更新定时器
-const researchUpdateTimer = ref(null)
+const researchUpdateTimer = ref<TimerHandle | null>(null)
 
 // 启动研究状态更新定时器
 const startResearchTimer = () => {
   if (researchUpdateTimer.value) return
   researchUpdateTimer.value = setInterval(() => {
-    if (gameStore.researchActivities.some(a => a.id.startsWith('research_'))) {
+    if (gameStore.researchActivities.some(a => String(a.id).startsWith('research_'))) {
       updateResearchStatus()
     }
   }, 1000)
 }
 
-const clickSelectedTech = (id) => {
+const clickSelectedTech = (id: string) => {
   if (selectedTech.value === id) {
     selectedTech.value = null
   } else {
@@ -316,7 +321,7 @@ const clickSelectedTech = (id) => {
   }
 }
 
-const isLoading = (tech) => {
+const isLoading = (tech: string) => {
   return gameStore.researchActivities.some(activity => activity.tech === tech) ||
     gameStore.pendingResearchActivities.some(activity => activity.tech === tech)
 }
@@ -379,25 +384,25 @@ onUnmounted(() => {
           </div>
         </el-scrollbar>
       </div>
-      <div v-if="selectedTech" class="tech-details">
+      <div v-if="selectedTechnology" class="tech-details">
         <h4>科技详情</h4>
         <div class="selected-tech">
           <div class="tech-name">
-            {{technologies.find(t => t.id === selectedTech).name}}
+            {{selectedTechnology.name}}
           </div>
           <div class="tech-description">
-            {{technologies.find(t => t.id === selectedTech).description}}
+            {{selectedTechnology.description}}
           </div>
           <div class="tech-requirements">
             <div class="tech-cost">
-              需要资源: {{getTechCost(technologies.find(t => t.id === selectedTech))}}
+              需要资源: {{getTechCost(selectedTechnology)}}
             </div>
             <div class="tech-unlocks">
-              解锁: {{getTechUnlocks(technologies.find(t => t.id === selectedTech))}}
+              解锁: {{getTechUnlocks(selectedTechnology)}}
             </div>
           </div>
           <div class="tech-actions">
-            <el-button type="primary" :loading="isLoading(selectedTech)" @click="researchTech"
+            <el-button type="primary" :loading="isLoading(selectedTechnology.id)" @click="researchTech"
               :disabled="!canResearch || gameStore.gameState !== 'playing'">
               {{ canResearch ? '研究' : '资源不足' }}
             </el-button>

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import GameInterface from './components/GameInterface.vue'
 
 const gameName = __APP_TITLE__

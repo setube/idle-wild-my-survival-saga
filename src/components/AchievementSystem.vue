@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { technologies } from '../plugins/recipes'
@@ -7,7 +7,7 @@ import { achievements } from '../plugins/achievements'
 const gameStore = useGameStore()
 
 // 本地成就状态
-const localAchievements = ref(achievements)
+const localAchievements = ref(achievements.map(achievement => ({ ...achievement })))
 
 // 已解锁的成就
 const unlockedAchievements = computed(() => {
@@ -32,7 +32,7 @@ const checkAchievements = () => {
 }
 
 // 解锁成就
-const unlockAchievement = (achievement) => {
+const unlockAchievement = (achievement: (typeof achievements)[number]) => {
   if (gameStore.achievements.unlocked.includes(achievement.id)) return
   // 标记为已解锁
   achievement.unlocked = true

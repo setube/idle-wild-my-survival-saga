@@ -1,18 +1,19 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { availableBuildings } from '../plugins/recipes'
-import { resourceLimits } from '../plugins/resource'
+
+import type { ActivityId, BuildingActivity, BuildingDefinition, TimerHandle } from '../types/game'
 
 const gameStore = useGameStore()
 
 // 建筑计时器
-const buildingTimer = ref(null)
+const buildingTimer = ref<TimerHandle | null>(null)
 // 建筑状态更新定时器
-const buildingUpdateTimer = ref(null)
+const buildingUpdateTimer = ref<TimerHandle | null>(null)
 // 活动状态响应式数据
-const buildingProgress = ref({})
-const buildingRemainingTime = ref({})
+const buildingProgress = ref<Record<ActivityId, number>>({})
+const buildingRemainingTime = ref<Record<ActivityId, string>>({})
 
 // 建筑列表
 const buildings = computed(() => {
@@ -20,7 +21,7 @@ const buildings = computed(() => {
 })
 
 // 检查是否满足建筑的技能要求
-const canSeeBuilding = (building) => {
+const canSeeBuilding = (building: BuildingDefinition) => {
   // 获取建筑的第一级所需技能
   const firstLevel = building.levels[0]
   if (!firstLevel.requirements) return true
@@ -32,13 +33,13 @@ const canSeeBuilding = (building) => {
 }
 
 // 获取建筑当前等级
-const getBuildingLevel = (buildingId) => {
+const getBuildingLevel = (buildingId: string) => {
   const existingBuilding = gameStore.buildings.find(b => b.id === buildingId)
   return existingBuilding ? existingBuilding.level : 0
 }
 
 // 检查是否可以建造或升级
-const canBuildOrUpgrade = (building) => {
+const canBuildOrUpgrade = (building: BuildingDefinition) => {
   const currentLevel = getBuildingLevel(building.id)
   // 如果已经是最高级，则不能再升级
   if (currentLevel >= building.levels.length) return false
@@ -56,7 +57,7 @@ const canBuildOrUpgrade = (building) => {
 }
 
 // 建造或升级建筑
-const buildOrUpgrade = (building) => {
+const buildOrUpgrade = (building: BuildingDefinition) => {
   const currentLevel = getBuildingLevel(building.id)
   const level = currentLevel ? currentLevel + 1 : 1
   // 查找建筑配置
@@ -86,7 +87,8 @@ const buildOrUpgrade = (building) => {
     }
   }
   // 创建建筑活动
-  const buildingActivity = {
+  const buildingActivity: BuildingActivity = {
+    startTime: Date.now(),
     id: `building_${building.id}_${Date.now()}`,
     buildingId: building.id,
     name: `${building.name} ${currentLevel ? '升级' : '建造'}`,
@@ -115,11 +117,12 @@ const buildOrUpgrade = (building) => {
 }
 
 // 完成建筑
-const completeBuilding = (activityId) => {
+const completeBuilding = (activityId: ActivityId) => {
   const activityIndex = gameStore.buildingActivities.findIndex(a => a.id === activityId)
   if (activityIndex === -1) return
   const activity = gameStore.buildingActivities[activityIndex]
   const buildingConfig = availableBuildings.find(b => b.id === activity.buildingId)
+  if (!buildingConfig) return
   // 从当前活动中移除
   gameStore.buildingActivities.splice(activityIndex, 1)
   // 应用建筑效果
@@ -144,7 +147,7 @@ const completeBuilding = (activityId) => {
     gameStore.addToEventLog(`建造了${buildingConfig.name}(等级${activity.level})`)
   }
   // 重新初始化建筑效果
-  initBuildingEffects()
+  gameStore.rebuildPermanentEffects()
   // 检查是否有等待中的建筑活动
   const nextBuilding = gameStore.pendingBuildingActivities.shift()
   if (nextBuilding) {
@@ -161,7 +164,7 @@ const completeBuilding = (activityId) => {
 }
 
 // 取消建筑活动
-const cancelBuilding = (activityId) => {
+const cancelBuilding = (activityId: ActivityId) => {
   // 检查当前活动
   const currentIndex = gameStore.buildingActivities.findIndex(a => a.id === activityId)
   if (currentIndex !== -1) {
@@ -206,7 +209,7 @@ const cancelBuilding = (activityId) => {
 }
 
 // 获取建筑活动剩余时间
-const getBuildingRemainingTime = (activity) => {
+const getBuildingRemainingTime = (activity: BuildingActivity) => {
   if (buildingRemainingTime.value[activity.id] !== undefined) return buildingRemainingTime.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -216,7 +219,7 @@ const getBuildingRemainingTime = (activity) => {
 }
 
 // 获取建筑活动进度
-const getBuildingProgress = (activity) => {
+const getBuildingProgress = (activity: BuildingActivity) => {
   if (buildingProgress.value[activity.id] !== undefined) return buildingProgress.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -252,27 +255,8 @@ const startBuildingTimer = () => {
   }, 1000)
 }
 
-const initBuildingEffects = () => {
-  // 遍历所有建筑应用永久效果
-  for (const building of gameStore.buildings) {
-    if (!building.effects) continue
-    // 应用存储上限效果
-    if (building.effects.storageMultiplier) {
-      for (const resource in resourceLimits) {
-        gameStore.resourceLimits[resource] = resourceLimits[resource] * building.effects.storageMultiplier
-      }
-    }
-    // 应用最大健康效果
-    if (building.effects.maxHealth) gameStore.player.maxHealth += building.effects.maxHealth
-    // 应用最大体力效果
-    if (building.effects.maxEnergy) gameStore.player.maxEnergy += building.effects.maxEnergy
-    // 制作效率
-    if (building.effects.craftingSpeed) gameStore.skillTreeEffects.craftingSpeed += building.effects.craftingSpeed
-  }
-}
-
 // 获取建筑状态文本
-const getBuildingStatusText = (building) => {
+const getBuildingStatusText = (building: BuildingDefinition) => {
   const currentLevel = getBuildingLevel(building.id)
   if (currentLevel === 0) return '未建造'
   if (currentLevel >= building.levels.length) return `已达到最高等级 (${currentLevel}级)`
@@ -280,7 +264,7 @@ const getBuildingStatusText = (building) => {
 }
 
 // 获取建筑下一级所需资源文本
-const getNextLevelCostText = (building) => {
+const getNextLevelCostText = (building: BuildingDefinition) => {
   const currentLevel = getBuildingLevel(building.id)
   if (currentLevel >= building.levels.length) return '已达到最高等级'
   const nextLevel = building.levels[currentLevel]
@@ -288,7 +272,7 @@ const getNextLevelCostText = (building) => {
 }
 
 // 获取建筑效果文本
-const getBuildingEffectsText = (building) => {
+const getBuildingEffectsText = (building: BuildingDefinition) => {
   const currentLevel = getBuildingLevel(building.id)
   if (currentLevel === 0) {
     // 显示第一级效果
@@ -297,12 +281,13 @@ const getBuildingEffectsText = (building) => {
   }
   // 显示当前等级效果
   const existingBuilding = gameStore.buildings.find(b => b.id === building.id)
+  if (!existingBuilding) return '无效果'
   return Object.entries(existingBuilding.effects).map(([effect, value]) => formatEffectText(effect, value)).join(', ')
 }
 
 // 格式化效果文本
-const formatEffectText = (effect, value) => {
-  const effectTexts = {
+const formatEffectText = (effect: string, value: number) => {
+  const effectTexts: Record<string, string> = {
     energyRecovery: `体力恢复 +${value}/小时`,
     maxHealth: `健康上限 +${value}`,
     storageMultiplier: `存储上限 x${value}`,
@@ -322,7 +307,7 @@ const formatEffectText = (effect, value) => {
 }
 
 // 检查建筑是否正在建造或升级中
-const isBuilding = (buildingId) => {
+const isBuilding = (buildingId: string) => {
   return gameStore.buildingActivities.some(activity => activity.buildingId === buildingId) ||
     gameStore.pendingBuildingActivities.some(activity => activity.id === buildingId)
 }

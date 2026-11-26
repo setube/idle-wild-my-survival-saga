@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 
@@ -49,22 +49,22 @@ const currentSeason = computed(() => {
     {
       name: '春季',
       icon: '🌱',
-      progress: seasonProgress.toFixed(0)
+      progress: Math.round(seasonProgress)
     },
     {
       name: '夏季',
       icon: '☀️',
-      progress: seasonProgress.toFixed(0)
+      progress: Math.round(seasonProgress)
     },
     {
       name: '秋季',
       icon: '🍂',
-      progress: seasonProgress.toFixed(0)
+      progress: Math.round(seasonProgress)
     },
     {
       name: '冬季',
       icon: '❄️',
-      progress: seasonProgress.toFixed(0)
+      progress: Math.round(seasonProgress)
     }
   ]
   // 检测季节变化

@@ -1,20 +1,27 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { skillTree } from '../plugins/skillTree'
+import type { SkillDefinition, SkillActivity, SkillKey, SkillBranch, ActivityId } from '../types/game'
+type SkillBranchKey = Exclude<SkillKey, 'combat'>
 
 const gameStore = useGameStore()
 
 // 当前选中的技能分支
-const activeSkillBranch = ref('gathering')
+const activeSkillBranchModel = ref<string | number | boolean | undefined>('gathering')
 // 技能活动计时器
-const skillTimer = ref(null)
+const skillTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 // 技能状态更新定时器
-const skillUpdateTimer = ref(null)
+const skillUpdateTimer = ref<ReturnType<typeof setInterval> | null>(null)
 // 活动状态响应式数据
-const skillProgress = ref({})
-const skillRemainingTime = ref({})
+const skillProgress = ref<Record<ActivityId, number>>({})
+const skillRemainingTime = ref<Record<ActivityId, string>>({})
+const skillBranchOptions = (Object.entries(skillTree) as [SkillBranchKey, SkillBranch][])
+  .map(([key, branch]) => ({ key, branch }))
+const activeSkillBranch = computed<SkillBranchKey>(() =>
+  skillBranchOptions.find(option => option.key === activeSkillBranchModel.value)?.key ?? 'gathering'
+)
 
 // 获取当前技能分支
 const currentSkillBranch = computed(() => {
@@ -22,7 +29,7 @@ const currentSkillBranch = computed(() => {
 })
 
 // 检查技能是否可以升级
-const canUpgradeSkill = (skill) => {
+const canUpgradeSkill = (skill: SkillDefinition) => {
   if (skill.maxLevel == gameStore.unlockedSkills[skill.id]) return false
   // 检查是否已达到最大等级
   if (skill.level >= skill.maxLevel) return false
@@ -32,7 +39,7 @@ const canUpgradeSkill = (skill) => {
   if (skill.requires) {
     // 检查基础技能等级要求
     for (const [baseSkill, level] of Object.entries(skill.requires)) {
-      if (baseSkill === 'skills') continue // 跳过特殊技能要求
+      if (baseSkill === 'skills' || typeof level !== 'number') continue // 跳过特殊技能要求
       if (gameStore.newSkills[baseSkill].level < level) return false
     }
     // 检查特殊技能要求
@@ -48,17 +55,18 @@ const canUpgradeSkill = (skill) => {
 }
 
 // 升级技能
-const upgradeSkill = (skill) => {
+const upgradeSkill = (skill: SkillDefinition) => {
   if (!canUpgradeSkill(skill)) return
   // 创建技能活动
-  const skillActivity = {
+  const skillActivity: SkillActivity = {
     id: `skill_${skill.id}_${Date.now()}`,
     skillId: skill.id,
     name: `${skill.name} ${gameStore.unlockedSkills[skill.id] ? '升级' : '升级'}`,
     duration: skill.duration * 1000, //升级时间
     cost: { exp: skill.cost.exp },
     currentSkillBranch: activeSkillBranch.value,
-    completed: false
+    completed: false,
+    startTime: Date.now()
   }
   // 检查是否有正在进行的技能活动
   if (gameStore.skillActivities.length < gameStore.player.level) {
@@ -80,15 +88,18 @@ const upgradeSkill = (skill) => {
 }
 
 // 完成技能升级/升级
-const completeSkill = (activityId) => {
+const completeSkill = (activityId: ActivityId) => {
   const activityIndex = gameStore.skillActivities.findIndex(a => a.id === activityId)
   if (activityIndex === -1) return
   const activity = gameStore.skillActivities[activityIndex]
-  const skill = skillTree[activity.currentSkillBranch].skills.find(s => s.id === activity.skillId)
+  const branchKey = skillBranchOptions.find(option => option.key === activity.currentSkillBranch)?.key
+  if (!branchKey) return
+  const skill = skillTree[branchKey].skills.find(item => item.id === activity.skillId)
+  if (!skill) return
   // 升级技能
   skill.level++
   // 应用技能效果
-  applySkillEffects(skill)
+  applySkillEffects(skill, branchKey)
   // 从当前活动中移除
   gameStore.skillActivities.splice(activityIndex, 1)
   // 记录日志
@@ -109,7 +120,7 @@ const completeSkill = (activityId) => {
 }
 
 // 取消技能活动
-const cancelSkill = (activityId) => {
+const cancelSkill = (activityId: ActivityId) => {
   // 检查当前活动
   const currentIndex = gameStore.skillActivities.findIndex(a => a.id === activityId)
   if (currentIndex !== -1) {
@@ -151,7 +162,7 @@ const cancelSkill = (activityId) => {
 }
 
 // 获取技能活动剩余时间
-const getSkillRemainingTime = (activity) => {
+const getSkillRemainingTime = (activity: SkillActivity) => {
   if (skillRemainingTime.value[activity.id] !== undefined) return skillRemainingTime.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -161,7 +172,7 @@ const getSkillRemainingTime = (activity) => {
 }
 
 // 获取技能活动进度
-const getSkillProgress = (activity) => {
+const getSkillProgress = (activity: SkillActivity) => {
   if (skillProgress.value[activity.id] !== undefined) return skillProgress.value[activity.id]
   const now = Date.now()
   const elapsed = now - activity.startTime
@@ -198,11 +209,10 @@ const startSkillTimer = () => {
 }
 
 // 应用技能效果
-const applySkillEffects = (skill) => {
+const applySkillEffects = (skill: SkillDefinition, branchKey: SkillBranchKey) => {
   // 更新游戏状态中的技能效果
   updateSkillEffects(skill.id, skill.effects, skill.level)
   // 更新基础技能等级
-  const branchKey = activeSkillBranch.value
   if (skill.level === 1) {
     // 如果是首次解锁技能，增加对应分支的基础技能等级
     gameStore.newSkills[branchKey].level += 1
@@ -212,41 +222,20 @@ const applySkillEffects = (skill) => {
 }
 
 // 更新技能效果
-const updateSkillEffects = (skillId, effects, level) => {
-  // 记录已解锁的技能
-  if (!gameStore.unlockedSkills[skillId]) gameStore.unlockedSkills[skillId] = 0
+const updateSkillEffects = (skillId: string, _effects: Record<string, number | boolean>, level: number) => {
   gameStore.unlockedSkills[skillId] = level
-  // 应用效果到游戏状态
-  for (const [effect, value] of Object.entries(effects)) {
-    if (gameStore.skillTreeEffects[effect] !== undefined) {
-      // 对于百分比效果，根据等级累加
-      if (typeof value === 'number') gameStore.skillTreeEffects[effect] = parseFloat((gameStore.skillTreeEffects[effect] + value).toFixed(2))
-      else gameStore.skillTreeEffects[effect] = value // 对于布尔值效果，直接设置
-    }
-  }
-  // 立即应用生存技能效果
-  if (skillId.includes('efficient_metabolism') ||
-    skillId.includes('weather_adaptation') ||
-    skillId.includes('energy_conservation') ||
-    skillId.includes('natural_healing') ||
-    skillId.includes('survival_expert')) {
-    // 应用最大健康加成
-    if (gameStore.skillTreeEffects.maxHealth > 0) {
-      const healthBonus = Math.floor(gameStore.player.maxHealth * gameStore.skillTreeEffects.maxHealth)
-      gameStore.player.maxHealth += healthBonus
-    }
-  }
+  gameStore.rebuildPermanentEffects()
 }
 
 // 获取技能等级样式
-const getSkillLevelStyle = (skill) => {
+const getSkillLevelStyle = (skill: SkillDefinition) => {
   if (skill.level === 0) return 'skill-level-0'
   if (skill.level === skill.maxLevel) return 'skill-level-max'
   return 'skill-level-partial'
 }
 
 // 获取技能连接线样式
-const getConnectionStyle = (skill, index) => {
+const getConnectionStyle = (skill: SkillDefinition, index: number) => {
   // 第一个技能没有连接线
   if (index === 0) return ''
   // 获取前一个技能
@@ -314,8 +303,8 @@ const showActiveEffects = () => {
 }
 
 // 格式化效果名称
-const formatEffectName = (effect) => {
-  const effectNames = {
+const formatEffectName = (effect: string) => {
+  const effectNames: Record<string, string> = {
     // 采集效果
     gatheringEfficiency: '采集效率',
     gatheringEnergyCost: '采集体力消耗',
@@ -350,7 +339,7 @@ const formatEffectName = (effect) => {
 }
 
 // 格式化效果值
-const formatEffectValue = (effect, value) => {
+const formatEffectValue = (effect: string, value: number | boolean) => {
   // 布尔值效果
   if (typeof value === 'boolean') return value ? '是' : '否'
   // 百分比效果
@@ -363,7 +352,7 @@ const formatEffectValue = (effect, value) => {
   return value
 }
 
-const isSkill = (skillId) => {
+const isSkill = (skillId: string) => {
   return gameStore.skillActivities.some(activity => activity.skillId === skillId) ||
     gameStore.pendingSkillActivities.some(activity => activity.skillId === skillId)
 }
@@ -436,10 +425,10 @@ onUnmounted(() => {
       </el-scrollbar>
     </div>
     <div class="skill-branches">
-      <el-radio-group v-model="activeSkillBranch" size="large">
-        <el-radio-button v-for="(branch, key) in skillTree" :key="key" :value="key">
-          <span class="branch-icon">{{ branch.icon }}</span>
-          {{ branch.name }}
+      <el-radio-group v-model="activeSkillBranchModel" size="large">
+        <el-radio-button v-for="option in skillBranchOptions" :key="option.key" :value="option.key">
+          <span class="branch-icon">{{ option.branch.icon }}</span>
+          {{ option.branch.name }}
         </el-radio-button>
       </el-radio-group>
     </div>
@@ -470,7 +459,7 @@ onUnmounted(() => {
               <div class="effects-title">技能效果:</div>
               <div v-for="(value, effect) in skill.effects" :key="effect" class="effect-item">
                 <span class="effect-name">{{ formatEffectName(effect) }}:</span>
-                <span class="effect-value" :class="{ 'positive-effect': value > 0, 'negative-effect': value < 0 }">
+                <span class="effect-value" :class="{ 'positive-effect': typeof value === 'number' && value > 0, 'negative-effect': typeof value === 'number' && value < 0 }">
                   {{ formatEffectValue(effect, value) }}
                 </span>
               </div>

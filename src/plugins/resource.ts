@@ -1,4 +1,6 @@
-export const resourceLimits = {
+import type { ResourceAmounts } from '../types/game'
+
+export const resourceLimits: ResourceAmounts = {
   food: 50,
   water: 50,
   wood: 50,
@@ -17,7 +19,7 @@ export const resourceLimits = {
   techFragment: 5,
 }
 
-export const resources = {
+export const resources: ResourceAmounts = {
   food: 50,
   water: 50,
   wood: 0,

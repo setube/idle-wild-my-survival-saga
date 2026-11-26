@@ -1,15 +1,17 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { recipes } from '../plugins/recipes'
 
+import type { Activity, ActivityId, Recipe, ResourceAmounts, TimerHandle } from '../types/game'
+
 const gameStore = useGameStore()
 
 // 活动更新定时器
-const activityTimerId = ref(null)
+const activityTimerId = ref<TimerHandle | null>(null)
 
 // 活动类型标签
-const activityTabs = ref('gathering')
+const activityTabs = ref<string | number>('gathering')
 
 // 按类型分组的活动
 const gatheringActivities = computed(() => {
@@ -27,7 +29,7 @@ const craftingActivities = computed(() => {
 })
 
 // 检查是否满足技能要求
-const meetsSkillRequirements = (recipe) => {
+const meetsSkillRequirements = (recipe: Recipe) => {
   if (!recipe.skillRequired) return true
   for (const [skill, level] of Object.entries(recipe.skillRequired)) {
     if (gameStore.newSkills[skill].level < level) return false
@@ -36,7 +38,7 @@ const meetsSkillRequirements = (recipe) => {
 }
 
 // 检查是否有足够的资源
-const hasEnoughResources = (recipe) => {
+const hasEnoughResources = (recipe: Recipe) => {
   if (!recipe.inputs) return true
   // 检查体力是否足够
   if (recipe.inputs.energy && gameStore.player.energy < recipe.inputs.energy) {
@@ -52,8 +54,9 @@ const hasEnoughResources = (recipe) => {
 }
 
 // 开始活动
-const startActivity = (recipeId) => {
+const startActivity = (recipeId: string) => {
   const recipe = recipes.find(r => r.id === recipeId)
+  if (!recipe) return
   // 双重检查资源是否足够
   if (!hasEnoughResources(recipe)) {
     gameStore.addToEventLog('资源不足，无法开始制作')
@@ -98,7 +101,8 @@ const startActivity = (recipeId) => {
     activityDuration = Math.floor(activityDuration / (1 + gameStore.skillTreeEffects.craftingSpeed))
   }
   activityDuration = Math.max(1, activityDuration)
-  const activity = {
+  const activity: Activity = {
+    startTime: Date.now(),
     id: Date.now(),
     recipeId,
     name: recipe.name,
@@ -122,7 +126,7 @@ const startActivity = (recipeId) => {
 }
 
 // 计算当前效果
-const getSkillEffect = (recipe) => {
+const getSkillEffect = (recipe: Recipe) => {
   // 计算活动持续时间
   let activityDuration = recipe.duration
   if (recipe.category === 'gathering' && gameStore.skillTreeEffects.gatheringEfficiency > 0) {
@@ -134,7 +138,7 @@ const getSkillEffect = (recipe) => {
   return Math.max(1, activityDuration)
 }
 
-const activityTimer = (activity) => {
+const activityTimer = (activity: Activity) => {
   activity.timer = setTimeout(() => {
     completeActivity(activity.id)
     // 检查是否有等待中的活动
@@ -146,6 +150,7 @@ const activityTimer = (activity) => {
 const startNextActivity = () => {
   if (gameStore.pendingActivities.length) {
     const nextActivity = gameStore.pendingActivities.shift()
+    if (!nextActivity) return
     nextActivity.startTime = Date.now()
     gameStore.currentActivities.push(nextActivity)
     activityTimer(nextActivity)
@@ -155,17 +160,18 @@ const startNextActivity = () => {
 }
 
 // 完成活动
-const completeActivity = (activityId) => {
+const completeActivity = (activityId: ActivityId) => {
   const activityIndex = gameStore.currentActivities.findIndex(a => a.id === activityId)
   if (activityIndex === -1) return false
   const activity = gameStore.currentActivities[activityIndex]
   const recipe = recipes.find(r => r.id === activity.recipeId)
+  if (!recipe) return false
   // 清除定时器
   if (activity.timer) clearTimeout(activity.timer)
   // 移除活动
   gameStore.currentActivities.splice(activityIndex, 1)
   // 应用技能效果到输出资源
-  let modifiedOutputs = {}
+  const modifiedOutputs: ResourceAmounts = {}
   // 添加输出资源
   for (const [resource, output] of Object.entries(recipe.outputs)) {
     let amount
@@ -221,7 +227,7 @@ const completeActivity = (activityId) => {
 }
 
 // 应用技能效果到资源收集
-const applyGatheringSkillEffects = (baseAmount, resourceType) => {
+const applyGatheringSkillEffects = (baseAmount: number, resourceType: string) => {
   let amount = baseAmount
   // 应用采集效率加成
   if (gameStore.skillTreeEffects.gatheringEfficiency > 0) amount *= (1 + gameStore.skillTreeEffects.gatheringEfficiency)
@@ -239,7 +245,7 @@ const applyGatheringSkillEffects = (baseAmount, resourceType) => {
 }
 
 // 应用技能效果到制作活动
-const applyCraftingSkillEffects = (recipe, outputs) => {
+const applyCraftingSkillEffects = (recipe: Recipe, outputs: ResourceAmounts) => {
   let modifiedOutputs = { ...outputs }
   // 应用制作质量加成
   if (gameStore.skillTreeEffects.craftingQuality > 0) {
@@ -264,7 +270,7 @@ const applyCraftingSkillEffects = (recipe, outputs) => {
 }
 
 // 应用技能效果到研究活动
-const applyResearchSkillEffects = (techFragment) => {
+const applyResearchSkillEffects = (techFragment: number) => {
   let amount = techFragment
   // 应用研究加成
   if (gameStore.skillTreeEffects.techFragmentYield > 0) amount = Math.floor(amount * (1 + gameStore.skillTreeEffects.techFragmentYield))
@@ -277,13 +283,13 @@ const applyResearchSkillEffects = (techFragment) => {
 }
 
 // 计算活动时间文本
-const getActivityDuration = (seconds) => {
+const getActivityDuration = (seconds: number) => {
   if (seconds < 60) return `${seconds}秒`
   return `${Math.floor(seconds / 60)}分${seconds % 60}秒`
 }
 
 // 获取资源输入文本
-const getInputText = (inputs) => {
+const getInputText = (inputs: ResourceAmounts) => {
   if (!inputs) return '无消耗'
   return Object.entries(inputs).map(([resource, amount]) => {
     if (resource === 'energy') return `体力x${amount}`
@@ -292,7 +298,7 @@ const getInputText = (inputs) => {
 }
 
 // 获取资源输出文本
-const getOutputText = (outputs) => {
+const getOutputText = (outputs: Recipe["outputs"]) => {
   if (!outputs) return '无产出'
   return Object.entries(outputs).map(([resource, range]) => {
     if (Array.isArray(range)) return `${gameStore.getResourceName(resource)} ${range[0]}~${range[1]}`
@@ -301,9 +307,9 @@ const getOutputText = (outputs) => {
 }
 
 // 获取技能要求文本
-const getSkillRequirementText = (skillRequired) => {
+const getSkillRequirementText = (skillRequired: ResourceAmounts) => {
   if (!skillRequired) return '无要求'
-  const skillNames = {
+  const skillNames: Record<string, string> = {
     gathering: '采集',
     crafting: '制作',
     combat: '战斗',
@@ -316,7 +322,7 @@ const getSkillRequirementText = (skillRequired) => {
 }
 
 // 获取技能效果加成文本
-const getSkillEffectText = (recipe) => {
+const getSkillEffectText = (recipe: Recipe) => {
   const effects = []
   const category = recipe.category
   if (category === 'gathering') {
@@ -351,8 +357,8 @@ const getSkillEffectText = (recipe) => {
 }
 
 // 活动进度和时间的响应式数据
-const activityProgress = ref({})
-const activityRemainingTime = ref({})
+const activityProgress = ref<Record<ActivityId, number>>({})
+const activityRemainingTime = ref<Record<ActivityId, string>>({})
 
 // 更新所有进行中活动的进度和时间
 const updateActivitiesStatus = () => {
@@ -373,7 +379,7 @@ const updateActivitiesStatus = () => {
 }
 
 // 计算进行中的活动完成百分比
-const getActivityProgress = (activity) => {
+const getActivityProgress = (activity: Activity) => {
   if (activityProgress.value[activity.id] !== undefined) return activityProgress.value[activity.id]
   // 初始计算
   const now = Date.now()
@@ -383,7 +389,7 @@ const getActivityProgress = (activity) => {
 }
 
 // 计算活动剩余时间
-const getActivityRemainingTime = (activity) => {
+const getActivityRemainingTime = (activity: Activity) => {
   if (activityRemainingTime.value[activity.id] !== undefined) return activityRemainingTime.value[activity.id]
   // 初始计算
   const now = Date.now()
@@ -404,7 +410,7 @@ const startActivityTimer = () => {
 }
 
 // 取消活动
-const cancelActivity = (activityId) => {
+const cancelActivity = (activityId: ActivityId) => {
   // 先检查当前活动
   const currentIndex = gameStore.currentActivities.findIndex(a => a.id === activityId)
   if (currentIndex !== -1) {

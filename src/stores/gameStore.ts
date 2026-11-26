@@ -4,9 +4,13 @@ import { encryptData, decryptData } from '../plugins/crypto'
 import { skillTree, skills } from '../plugins/skillTree'
 import { merchants } from '../plugins/merchants'
 import { resources, resourceLimits } from '../plugins/resource'
+import { availableBuildings, technologies } from '../plugins/recipes'
+import type { GameState, ResourceAmounts } from '../types/game'
+import { assert, assertFiniteNumber } from '../plugins/assertions'
+import { normalizeSave } from '../plugins/saveValidation'
 
-export const useGameStore = defineStore('game', {
-  state: () => ({
+export const createInitialState = (): GameState => ({
+    appliedPermanentStats: { maxHealth: 0, maxEnergy: 0 },
     // 玩家基本信息
     player: {
       level: 1,
@@ -30,6 +34,7 @@ export const useGameStore = defineStore('game', {
       gatheringYield: 0,
       // 制作效果
       craftingSpeed: 0,
+      maxHealth: 0,
       resourceSaving: 0,
       extraCraftingOutput: 0,
       toolDurability: 0,
@@ -88,11 +93,11 @@ export const useGameStore = defineStore('game', {
     // 今天是否已经触发了事件
     eventTriggered: false,
     // 基础资源
-    resources,
+    resources: { ...resources },
     // 资源上限
-    resourceLimits,
+    resourceLimits: { ...resourceLimits },
     // 技能等级
-    newSkills: skills,
+    newSkills: structuredClone(skills),
     // 已解锁的建筑
     buildings: [],
     // 当前进行中的活动
@@ -130,7 +135,7 @@ export const useGameStore = defineStore('game', {
       }
     },
     // 已研究
-    researched: [],
+    researched: ['basic_survival'],
     recipes: [],
     // 游戏设置
     settings: {
@@ -164,11 +169,62 @@ export const useGameStore = defineStore('game', {
     // 任务系统
     activeQuests: [], // 进行中的任务
     completedQuests: [] // 已完成的任务
-  }),
+  })
+
+/** Recreate derived bonuses from their sources; calling this repeatedly is safe. */
+export function rebuildStateEffects(state: GameState): void {
+  const effects = createInitialState().skillTreeEffects
+  const knownSkills = new Set<string>()
+  for (const branch of Object.values(skillTree)) {
+    for (const skill of branch.skills) {
+      knownSkills.add(skill.id)
+      const level = state.unlockedSkills[skill.id] || 0
+      assert(Number.isInteger(level) && level >= 0 && level <= skill.maxLevel, '技能等级超出范围: ' + skill.id)
+      for (const [key, value] of Object.entries(skill.effects)) {
+        if (typeof value === 'number') {
+          const current = effects[key]
+          assert(typeof current === 'number', '未知技能数值效果: ' + key)
+          effects[key] = Number((current + value * level).toFixed(8))
+        } else if (level > 0) effects[key] = value
+      }
+    }
+  }
+  for (const key of Object.keys(state.unlockedSkills)) assert(knownSkills.has(key), '未知技能: ' + key)
+  let maxHealthBonus = 0
+  let maxEnergyBonus = 0
+  let storageMultiplier = 1
+  const buildingIds = new Set<string>()
+  for (const building of state.buildings) {
+    assert(!buildingIds.has(building.id), '建筑重复: ' + building.id)
+    buildingIds.add(building.id)
+    const config = availableBuildings.find(item => item.id === building.id)
+    const level = config?.levels.find(item => item.level === building.level)
+    assert(config && level, '建筑等级无效: ' + building.id)
+    building.name = config.name
+    building.effects = { ...level.effects }
+    maxHealthBonus += level.effects.maxHealth || 0
+    maxEnergyBonus += level.effects.maxEnergy || 0
+    storageMultiplier *= level.effects.storageMultiplier || 1
+    effects.craftingSpeed += level.effects.craftingSpeed || 0
+  }
+  state.skillTreeEffects = effects
+  state.resourceLimits = Object.fromEntries(Object.entries(resourceLimits).map(([key, value]) => [key, value * storageMultiplier]))
+  const baseHealth = Math.max(1, state.player.maxHealth - state.appliedPermanentStats.maxHealth)
+  const baseEnergy = Math.max(1, state.player.maxEnergy - state.appliedPermanentStats.maxEnergy)
+  maxHealthBonus += Math.floor(baseHealth * effects.maxHealth)
+  state.player.maxHealth = baseHealth + maxHealthBonus
+  state.player.maxEnergy = baseEnergy + maxEnergyBonus
+  state.appliedPermanentStats = { maxHealth: maxHealthBonus, maxEnergy: maxEnergyBonus }
+  state.player.health = Math.min(state.player.health, state.player.maxHealth)
+  state.player.energy = Math.min(state.player.energy, state.player.maxEnergy)
+}
+
+export const useGameStore = defineStore('game', {
+  state: createInitialState,
   getters: {
     // 计算玩家总体实力
     playerPower: (state) => {
-      return Object.values(state.skills).reduce((sum, level) => sum + level, 0)
+      return Object.values(state.newSkills).reduce((sum, skill) => sum + skill.level, 0)
     },
     // 计算资源总量
     totalResources: (state) => {
@@ -180,7 +236,7 @@ export const useGameStore = defineStore('game', {
       return `第${day}天 ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
     },
     // 检查资源是否足够
-    hasEnoughResources: (state) => (requirements) => {
+    hasEnoughResources: (state) => (requirements: ResourceAmounts) => {
       for (const [resource, amount] of Object.entries(requirements)) {
         if (state.resources[resource] < amount) return false
       }
@@ -213,112 +269,80 @@ export const useGameStore = defineStore('game', {
         this.addToEventLog('数据加密失败')
       }
     },
-    // 加载游戏
-    loadGame() {
-      const data = localStorage.getItem(__APP_NAME__)
-      if (data) {
-        const encodedAppName = btoa(`+++${__APP_NAME__}`)
-        const saveData = data.replace(encodedAppName, '')
-        if (saveData) {
-          try {
-            this.$state = decryptData(saveData)
-            this.resetSkillEffects()
-            this.initBuildingEffects()
-            this.fixSkills()
-            this.addToEventLog('游戏已加载')
-            return true
-          } catch (error) {
-            this.addToEventLog('数据加载失败:', error)
-          }
+    // Decode and validate before changing either live state or the stored save.
+    restoreSave(data: string, persist = false): boolean {
+      try {
+        assert(typeof data === 'string' && data.length > 0, '存档不能为空')
+        const suffix = btoa('+++' + __APP_NAME__)
+        assert(data.endsWith(suffix), '存档标识不正确')
+        const decoded = decryptData(data.slice(0, -suffix.length))
+        const restored = normalizeSave(decoded, createInitialState())
+        // Legacy saves already include these health/energy bonuses.
+        if (typeof decoded === 'object' && decoded !== null && !('appliedPermanentStats' in decoded)) {
+          restored.appliedPermanentStats = restored.buildings.reduce((total, building) => ({
+            maxHealth: total.maxHealth + (building.effects.maxHealth || 0),
+            maxEnergy: total.maxEnergy + (building.effects.maxEnergy || 0),
+          }), { maxHealth: 0, maxEnergy: 0 })
         }
-      }
-      return false
-    },
-    // 初始化建筑资源上限效果
-    initBuildingEffects() {
-      // 遍历所有建筑应用永久效果
-      for (const building of this.buildings) {
-        if (!building.effects) continue
-        // 应用存储上限效果
-        if (building.effects.storageMultiplier) {
-          for (const resource in resourceLimits) {
-            this.resourceLimits[resource] = resourceLimits[resource] * building.effects.storageMultiplier
-            if (this.resources[resource] > this.resourceLimits[resource]) {
-              this.resources[resource] = this.resourceLimits[resource]
-            }
-          }
-        }
+        rebuildStateEffects(restored)
+        if (persist) localStorage.setItem(__APP_NAME__, data)
+        this.$state = restored
+        this.syncConfiguration()
+        this.addToEventLog('游戏已加载')
+        return true
+      } catch (error) {
+        this.addToEventLog('数据加载失败:', error)
+        return false
       }
     },
-    // 修复技能问题
-    fixSkills() {
-      // 初始化修复技能问题
-      const skillsArray = Object.values(this.newSkills)
-      const fixedSkills = {}
-      Object.keys(this.newSkills).forEach((key, index) => {
-        const item = skillsArray[index]
-        fixedSkills[key] = typeof item === 'string' ? Object.values(skills)[index] : item
-      })
-      this.newSkills = fixedSkills
-    },
-    // 重置错误的技能效果
-    resetSkillEffects() {
-      for (const skillId in this.skillTreeEffects) {
-        if (typeof this.skillTreeEffects[skillId] === 'number') {
-          const skillData = this.findSkillEffectById(skillId)
-          if (skillData) {
-            const { effects, maxLevel } = skillData
-            for (const [effect, value] of Object.entries(effects)) {
-              if (this.skillTreeEffects[value[0]] !== undefined) {
-                if (typeof value[1] === 'number') {
-                  const targetValue = value[1] * maxLevel
-                  // 处理正效果（上限）
-                  if (value[1] > 0 && this.skillTreeEffects[value[0]] > targetValue) {
-                    this.skillTreeEffects[value[0]] = parseFloat(targetValue.toFixed(2))
-                  }
-                  // 处理负效果（下限）
-                  else if (value[1] < 0 && this.skillTreeEffects[value[0]] < targetValue) {
-                    this.skillTreeEffects[value[0]] = parseFloat(targetValue.toFixed(2))
-                  }
-                }
-              }
-            }
-          }
-        }
+    loadGame(): boolean {
+      try {
+        const data = localStorage.getItem(__APP_NAME__)
+        return data ? this.restoreSave(data) : false
+      } catch (error) {
+        this.addToEventLog('数据加载失败:', error)
+        return false
       }
     },
-    findSkillEffectById(skillId) {
+    importGame(data: string): boolean { return this.restoreSave(data, true) },
+    syncConfiguration() {
       for (const branch of Object.values(skillTree)) {
-        for (const skill of branch.skills) {
-          for (const [effect, value] of Object.entries(skill.effects)) {
-            if (effect === skillId) {
-              return {
-                effects: Object.entries(skill.effects), // 获取键值对
-                maxLevel: skill.maxLevel // 获取 maxLevel
-              }
-            }
-          }
-        }
+        for (const skill of branch.skills) skill.level = this.unlockedSkills[skill.id] || 0
       }
-      return null // 如果未找到，返回 null
+      for (const tech of technologies) tech.researched = this.researched.includes(tech.id)
+    },
+    rebuildPermanentEffects() {
+      rebuildStateEffects(this.$state)
+      this.syncConfiguration()
+    },
+    initBuildingEffects() { this.rebuildPermanentEffects() },
+    resetSkillEffects() { this.rebuildPermanentEffects() },
+    fixSkills() {
+      for (const [key, skill] of Object.entries(skills)) {
+        if (typeof this.newSkills[key] !== 'object') this.newSkills[key] = structuredClone(skill)
+      }
     },
     // 添加资源
-    addResource(resource, amount) {
-      if (!this.resources.hasOwnProperty(resource)) return false
+    addResource(resource: string, amount: number) {
+      assertFiniteNumber(amount, '资源数量')
+      if (!Object.hasOwn(this.resources, resource)) return false
       // 确保不超过上限
       const newAmount = this.resources[resource] + amount
       this.resources[resource] = Math.min(newAmount, this.resourceLimits[resource])
       return true
     },
     // 消耗资源
-    consumeResource(resource, amount) {
-      if (!this.resources.hasOwnProperty(resource)) return false
+    consumeResource(resource: string, amount: number) {
+      assertFiniteNumber(amount, '资源数量')
+      if (!Object.hasOwn(this.resources, resource)) return false
       if (this.resources[resource] < amount) return false
       this.resources[resource] -= amount
       return true
     },
     // 增加技能经验
-    addSkillExp(skill, exp) {
+    addSkillExp(skill: string, exp: number) {
+      assertFiniteNumber(exp, '技能经验')
+      assert(Object.hasOwn(this.newSkills, skill), '技能不存在')
       this.newSkills[skill].exp += exp
       this.addToEventLog(`你获得了${exp}点${this.getResourceName(skill)}技能经验`)
       if (this.newSkills[skill].exp >= this.newSkills[skill].expToNextLevel) {
@@ -328,6 +352,12 @@ export const useGameStore = defineStore('game', {
         this.newSkills[skill].expToNextLevel = Math.floor(this.newSkills[skill].expToNextLevel * 1.5)
         this.addToEventLog(`${this.getResourceName(skill)}技能提升到${this.newSkills[skill].level}级！`)
       }
+      this.saveGame()
+    },
+    addExperience(exp: number) {
+      assertFiniteNumber(exp, '幸存者经验')
+      this.player.exp += exp
+      this.addToEventLog(`你获得了${exp}点幸存者经验`)
       this.saveGame()
     },
     // 计算当前可用的商人
@@ -343,8 +373,8 @@ export const useGameStore = defineStore('game', {
       })
     },
     // 获取资源名称
-    getResourceName(resourceKey) {
-      const resourceNames = {
+    getResourceName(resourceKey: string) {
+      const resourceNames: Record<string, string> = {
         exp: '幸存者经验',
         maxHealth: '最大健康',
         maxEnergy: '最大体力',
@@ -398,7 +428,7 @@ export const useGameStore = defineStore('game', {
         const seasons = ['spring', 'summer', 'autumn', 'winter']
         const currentSeason = seasons[seasonIndex]
         // 各季节天气概率
-        const weatherProbabilities = {
+        const weatherProbabilities: Record<string, Record<string, number>> = {
           spring: {
             clear: 0.3,
             cloudy: 0.3,
@@ -455,7 +485,7 @@ export const useGameStore = defineStore('game', {
         }
         this.weather.nextChangeDay = nextDay
         this.weather.nextChangeHour = nextHour
-        const weatherEffects = {
+        const weatherEffects: Record<string, string> = {
           clear: '视野良好，采集效率+10%',
           cloudy: '温度适宜，体力消耗-5%',
           rainy: '水资源收集+20%，移动速度-10%',
@@ -481,7 +511,7 @@ export const useGameStore = defineStore('game', {
     },
     // 获取天气名称
     getWeatherName() {
-      const weatherNames = {
+      const weatherNames: Record<string, string> = {
         clear: '晴朗',
         cloudy: '多云',
         rainy: '小雨',
@@ -498,7 +528,7 @@ export const useGameStore = defineStore('game', {
     // 触发随机事件
     triggerRandomEvent() {
       // 基础事件
-      const basicEvents = [
+      const basicEvents: { id: string; name: string; effect: () => void; weight: number; minDay?: number }[] = [
         {
           id: 'rain', name: '下雨了', effect: () => {
             this.addResource('water', 10)
@@ -508,7 +538,7 @@ export const useGameStore = defineStore('game', {
         },
         {
           id: 'animal', name: '野生动物', effect: () => {
-            if (this.newSkills.combat > 2) {
+            if (this.newSkills.combat.level > 2) {
               this.addResource('food', 15)
               this.addToEventLog('你成功猎到了一只野兔，获得了食物')
             } else {
@@ -572,7 +602,7 @@ export const useGameStore = defineStore('game', {
         },
         {
           id: 'predator', name: '掠食者', effect: () => {
-            if (this.newSkills.combat >= 3) {
+            if (this.newSkills.combat.level >= 3) {
               this.addToEventLog('一只野兽袭击了你，但你成功击退了它，还获得了一些食物')
               this.addResource('food', 20)
               this.addSkillExp('combat', 20)
@@ -644,9 +674,10 @@ export const useGameStore = defineStore('game', {
       this.addToEventLog('你没能生存下来...')
     },
     // 添加事件日志
-    addToEventLog(message) {
+    addToEventLog(message: string, detail?: unknown) {
       const timestamp = `${this.gameTime.day}天 ${this.gameTime.hour}:${this.gameTime.minute}`
-      this.eventLog.unshift({ timestamp, message })
+      const detailText = detail instanceof Error ? detail.message : detail === undefined ? '' : String(detail)
+      this.eventLog.unshift({ timestamp, message: message + detailText })
       // 限制日志长度
       if (this.eventLog.length > 100) this.eventLog.pop()
     },

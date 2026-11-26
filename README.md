@@ -16,7 +16,8 @@
 - 前端框架：Vue 3 + Composition API
 - UI组件库：Element Plus
 - 状态管理：Pinia
-- 核心语言：JavaScript
+- 核心语言：TypeScript（严格模式，包含 Vue 模板类型检查）
+- 包管理与测试：Bun 1.4.5
 - 构建工具：Vite
 - 数据加密：CryptoJS
 
@@ -27,20 +28,36 @@
 - Pinia 团队提供了简洁的状态管理方案
 
 ## 项目部署
+### 环境要求
+
+安装 [Bun](https://bun.com/) 1.4.5 或更新版本。项目使用 `bun.lock` 锁定依赖；开发、测试、构建和 CI 均通过 Bun 运行。
+
 ### 安装项目
 ```bash
-npm install
+bun install --frozen-lockfile
 ```
 
 ### 运行项目
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### 编译项目
 ```bash
-npm run build
+bun run build
 ```
+
+构建前会执行 `vue-tsc`，检查所有 TypeScript 源文件和 Vue 模板。构建产物输出到 `docs/`，供 GitHub Pages 工作流和 Docker 镜像使用。推送到 `main` 后，GitHub Actions 会自动完成类型检查、测试、生产构建和 Pages 部署；自定义域名由 GitHub Pages 设置保存，不需要在 `public/` 中维护 CNAME 文件。
+
+### 验证项目
+
+```bash
+bun run typecheck
+bun test
+bun run check
+```
+
+`bun run check` 依次执行严格类型检查、回归测试和生产构建。存档导入、资源数量、配置引用等边界使用运行时断言，损坏或不受支持的存档会被拒绝；旧版加密存档仍可导入。永久加成按已解锁技能和建筑等级重算，修正旧版本的重复累加与读档裁剪。体力旁的帮助按钮可查看当前恢复数值，资源名称旁的帮助按钮可查看获取方式和解锁条件。
 
 ## Docker 部署
 
@@ -56,6 +73,8 @@ docker pull ghcr.io/setube/idle-wild-my-survival-saga:latest
 ```bash
 docker run -d -p 2543:80 --name idle-wild-my-survival-saga ghcr.io/setube/idle-wild-my-survival-saga:latest
 ```
+
+镜像在 Bun 构建阶段执行完整检查，再由 Nginx 在容器内的 80 端口提供静态文件。
 
 
 ## 版权声明

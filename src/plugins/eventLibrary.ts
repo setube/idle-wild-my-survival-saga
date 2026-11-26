@@ -1,3 +1,5 @@
+import type { GameEvent } from '../types/game'
+
 export const eventTypes = {
   positive: { icon: '🍀', color: '#67C23A', title: '幸运事件' },
   neutral: { icon: '⚖️', color: '#909399', title: '普通事件' },
@@ -6,7 +8,7 @@ export const eventTypes = {
   special: { icon: '✨', color: '#8E44AD', title: '特殊事件' }
 }
 
-export const eventLibrary = [
+export const eventLibrary: GameEvent[] = [
   // 正面事件
   {
     id: 'wild_harvest',

@@ -1,18 +1,19 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { ElMessage } from 'element-plus'
+import type { Merchant, MerchantSellItem, MerchantBuyItem, SpecialTrade, ResourceAmounts } from '../types/game'
 
 const gameStore = useGameStore()
 
 // 交易标签页
-const tradeTab = ref('buy')
+const tradeTab = ref<string | number>('buy')
 
 // 当前选中的商人
-const activeMerchant = ref(null)
+const activeMerchant = ref<Merchant | null>(null)
 
 // 选择商人
-const selectMerchant = (merchant) => {
+const selectMerchant = (merchant: Merchant) => {
 	activeMerchant.value = merchant
 	tradeTab.value = 'buy' // 默认显示购买标签页
 }
@@ -32,7 +33,7 @@ const playerSellableItems = computed(() => {
 })
 
 // 格式化价格显示
-const formatPrice = (priceObj) => {
+const formatPrice = (priceObj: ResourceAmounts) => {
 	return Object.entries(priceObj)
 		.map(([resource, amount]) => {
 			if (resource === 'health' || resource === 'energy') return `${resource === 'health' ? '健康' : '体力'} ${amount}`
@@ -42,7 +43,7 @@ const formatPrice = (priceObj) => {
 }
 
 // 检查是否能负担价格
-const canAfford = (priceObj) => {
+const canAfford = (priceObj: ResourceAmounts) => {
 	for (const [resource, amount] of Object.entries(priceObj)) {
 		if (gameStore.resources[resource] < amount) return false
 	}
@@ -50,7 +51,8 @@ const canAfford = (priceObj) => {
 }
 
 // 购买物品
-const buyItem = (item) => {
+const buyItem = (item: MerchantSellItem) => {
+	if (!activeMerchant.value) return
 	// 检查库存
 	if (item.stock <= 0) {
 		ElMessage.error('该物品已售罄')
@@ -84,7 +86,8 @@ const buyItem = (item) => {
 }
 
 // 出售物品
-const sellItem = (item) => {
+const sellItem = (item: MerchantBuyItem) => {
+	if (!activeMerchant.value) return
 	// 检查玩家是否有该物品
 	if (gameStore.resources[item.resourceId] <= 0) {
 		ElMessage.error('你没有足够的物品')
@@ -104,7 +107,7 @@ const sellItem = (item) => {
 }
 
 // 检查是否可以执行特殊交易
-const canExecuteSpecialTrade = (trade) => {
+const canExecuteSpecialTrade = (trade: SpecialTrade) => {
 	for (const [resource, amount] of Object.entries(trade.inputs)) {
 		if (resource === 'health') {
 			if (gameStore.player.health < amount) return false
@@ -118,7 +121,8 @@ const canExecuteSpecialTrade = (trade) => {
 }
 
 // 执行特殊交易
-const executeSpecialTrade = (trade) => {
+const executeSpecialTrade = (trade: SpecialTrade) => {
+	if (!activeMerchant.value) return
 	// 再次检查资源是否充足
 	if (!canExecuteSpecialTrade(trade)) {
 		ElMessage.error('资源不足')

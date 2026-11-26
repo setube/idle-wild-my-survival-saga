@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
-import pkg from './package.json'
+import pkg from './package.json' with { type: 'json' }
 import vitePluginBundleObfuscator from 'vite-plugin-bundle-obfuscator'
 
 export default defineConfig({
@@ -17,10 +17,10 @@ export default defineConfig({
     outDir: 'docs',
     minify: 'terser',
     chunkSizeWarningLimit: 800,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) return 'vendor'
+        codeSplitting: {
+          groups: [{ name: 'vendor', test: /node_modules/ }]
         },
         chunkFileNames: 'assets/js/[name]-[hash].js',
         entryFileNames: 'assets/js/[name]-[hash].js',
@@ -39,14 +39,17 @@ export default defineConfig({
   plugins: [
     vue(),
     AutoImport({
+      dts: false,
       resolvers: [ElementPlusResolver()]
     }),
     Components({
+      dts: false,
       resolvers: [ElementPlusResolver()]
     }),
     vitePluginBundleObfuscator({
       log: false,
       enable: true,
+      excludes: [/vendor/],
       options: {
         log: false,
         compact: true,
@@ -63,7 +66,7 @@ export default defineConfig({
         unicodeEscapeSequence: true,
         identifierNamesGenerator: 'hexadecimal'
       },
-      autoExcludeNodeModules: true
+      autoExcludeNodeModules: false
     })
   ],
   worker: {

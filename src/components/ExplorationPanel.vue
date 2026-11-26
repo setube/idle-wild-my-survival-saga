@@ -1,12 +1,14 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { explorationRegions } from '../plugins/explorationRegions'
 
+import type { ActivityId, ExplorationActivity, ExplorationRegion, TimerHandle } from '../types/game'
+
 const gameStore = useGameStore()
 
 // 当前选中的区域
-const selectedRegion = ref(null)
+const selectedRegion = ref<string | null>(null)
 
 // 可探索的区域（根据玩家技能等级过滤）
 const availableRegions = computed(() => {
@@ -51,7 +53,7 @@ const canExplore = computed(() => {
 })
 
 // 获取区域资源消耗文本
-const getResourceCostText = (region) => {
+const getResourceCostText = (region: ExplorationRegion) => {
   const costs = [`体力 ${region.energyCost}`]
   for (const [resource, amount] of Object.entries(region.resourceCost)) {
     costs.push(`${gameStore.getResourceName(resource)} ${amount}`)
@@ -60,7 +62,7 @@ const getResourceCostText = (region) => {
 }
 
 // 获取区域可能发现的资源文本
-const getPossibleResourcesText = (region) => {
+const getPossibleResourcesText = (region: ExplorationRegion) => {
   const costs = []
   for (const resource of region.resources) {
     costs.push(`${gameStore.getResourceName(resource)}`)
@@ -69,7 +71,7 @@ const getPossibleResourcesText = (region) => {
 }
 
 // 获取区域危险文本
-const getDangersText = (region) => {
+const getDangersText = (region: ExplorationRegion) => {
   const costs = []
   for (const resource of region.dangers) {
     costs.push(`${gameStore.getResourceName(resource)}`)
@@ -81,6 +83,7 @@ const getDangersText = (region) => {
 const startExploration = () => {
   if (!selectedRegion.value || !canExplore.value) return
   const region = explorationRegions.find(r => r.id === selectedRegion.value)
+  if (!region) return
   // 计算活动持续时间
   let duration = region.explorationTime
   if (gameStore.skillTreeEffects.gatheringEfficiency > 0) {
@@ -88,7 +91,8 @@ const startExploration = () => {
   }
   duration = Math.max(1, duration) * 1000
   // 创建探索活动
-  const explorationActivity = {
+  const explorationActivity: ExplorationActivity = {
+    startTime: Date.now(),
     id: `explore_${region.id}_${Date.now()}`,
     recipeId: `explore_${region.id}`,
     name: `探索${region.name}`,
@@ -124,7 +128,7 @@ const startExploration = () => {
 }
 
 // 取消探索活动
-const cancelExploration = (activityId) => {
+const cancelExploration = (activityId: ActivityId) => {
   // 先检查当前活动
   const currentIndex = gameStore.explorationActivities.findIndex(a => a.id === activityId)
   if (currentIndex !== -1) {
@@ -174,7 +178,7 @@ const cancelExploration = (activityId) => {
 }
 
 // 完成探索
-const completeExploration = (activityId, region) => {
+const completeExploration = (activityId: ActivityId, region: ExplorationRegion) => {
   // 从当前活动中移除
   const activityIndex = gameStore.explorationActivities.findIndex(a => a.id === activityId)
   if (activityIndex === -1) return
@@ -208,7 +212,7 @@ const completeExploration = (activityId, region) => {
 }
 
 // 生成探索结果
-const generateExplorationResults = (region) => {
+const generateExplorationResults = (region: ExplorationRegion) => {
   // 基础发现率
   const baseDiscoveryChance = 0.7
   // 根据难度和技能调整发现率
@@ -242,7 +246,7 @@ const generateExplorationResults = (region) => {
 }
 
 // 处理危险事件
-const handleDangerEvent = (danger, region) => {
+const handleDangerEvent = (danger: string, region: ExplorationRegion) => {
   switch (danger) {
     case 'predator':
       if (gameStore.newSkills.combat.level >= region.difficulty) {
@@ -308,7 +312,7 @@ const handleDangerEvent = (danger, region) => {
 }
 
 // 处理特殊发现
-const handleSpecialDiscovery = (region) => {
+const handleSpecialDiscovery = (region: ExplorationRegion) => {
   const discoveries = [
     {
       name: '隐藏补给',
@@ -371,10 +375,10 @@ const handleSpecialDiscovery = (region) => {
 }
 
 // 活动进度和时间的响应式数据
-const activityProgress = ref({})
-const activityRemainingTime = ref({})
+const activityProgress = ref<Record<ActivityId, number>>({})
+const activityRemainingTime = ref<Record<ActivityId, string>>({})
 // 活动更新定时器
-const activityTimerId = ref(null)
+const activityTimerId = ref<TimerHandle | null>(null)
 
 // 更新所有进行中活动的进度和时间
 const updateActivitiesStatus = () => {
@@ -384,7 +388,8 @@ const updateActivitiesStatus = () => {
     const progress = Math.min(100, (elapsed / activity.duration) * 100)
     // 检查是否已完成
     if (progress >= 100) {
-      completeExploration(activity.id, explorationRegions.find(r => r.id === activity.region))
+      const region = explorationRegions.find(r => r.id === activity.region)
+      if (region) completeExploration(activity.id, region)
       return
     }
     activityProgress.value[activity.id] = progress
@@ -395,7 +400,7 @@ const updateActivitiesStatus = () => {
 }
 
 // 计算进行中的活动完成百分比
-const getActivityProgress = (activity) => {
+const getActivityProgress = (activity: ExplorationActivity) => {
   if (activityProgress.value[activity.id] !== undefined) return activityProgress.value[activity.id]
   // 初始计算
   const now = Date.now()
@@ -405,7 +410,7 @@ const getActivityProgress = (activity) => {
 }
 
 // 计算活动剩余时间
-const getActivityRemainingTime = (activity) => {
+const getActivityRemainingTime = (activity: ExplorationActivity) => {
   if (activityRemainingTime.value[activity.id] !== undefined) return activityRemainingTime.value[activity.id]
   // 初始计算
   const now = Date.now()
@@ -425,7 +430,7 @@ const startActivityTimer = () => {
   }, 1000)
 }
 
-const clickSelectedRegion = (id) => {
+const clickSelectedRegion = (id: string) => {
   if (selectedRegion.value == id) {
     selectedRegion.value = null
     return

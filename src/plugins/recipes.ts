@@ -1,4 +1,6 @@
-export const recipes = [
+import type { Recipe, Technology, BuildingDefinition } from '../types/game'
+
+export const recipes: Recipe[] = [
 	// 基础采集配方
 	{
 		id: 'gather_food',
@@ -125,7 +127,7 @@ export const recipes = [
 	},
 ]
 
-export const technologies = [
+export const technologies: Technology[] = [
 	// 基础科技
 	{
 		id: 'basic_survival',
@@ -144,7 +146,27 @@ export const technologies = [
 		cost: { techFragment: 1 },
 		unlocks: ['advanced_crafting', 'tool_making'],
 		researchTime: 60,
-		requirements: ['basic_survival']
+			requirements: ['basic_survival']
+	},
+	{
+		id: 'metallurgy',
+		name: '冶金学',
+		description: '研究金属加工，解锁零件制作',
+		researched: false,
+		cost: { techFragment: 3 },
+		researchTime: 900,
+		unlocks: ['advanced_tools'],
+		requirements: ['advanced_crafting']
+	},
+	{
+		id: 'advanced_tools',
+		name: '高级工具',
+		description: '研究先进工具与电子元件的制作方法',
+		researched: false,
+		cost: { techFragment: 4 },
+		researchTime: 1200,
+		unlocks: [],
+		requirements: ['tool_making', 'metallurgy']
 	},
 	{
 		id: 'water_collection',
@@ -186,10 +208,20 @@ export const technologies = [
 		unlocks: ['medicine_brewing'],
 		researchTime: 600,
 		requirements: ['water_collection']
+	},
+	{
+		id: 'medicine_brewing',
+		name: '药品调配',
+		description: '研究草药与水的配比，解锁药品制作',
+		researched: false,
+		cost: { techFragment: 3, herb: 5 },
+		researchTime: 900,
+		unlocks: [],
+		requirements: ['water_purification']
 	}
 ]
 
-export const availableBuildings = [
+export const availableBuildings: BuildingDefinition[] = [
 	{
 		id: 'shelter',
 		name: '简易庇护所',

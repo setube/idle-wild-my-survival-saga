@@ -1,17 +1,11 @@
-FROM node:latest
+FROM oven/bun:1.4.5 AS build
 
-RUN mkdir -p /workspace
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY . .
+RUN bun run check
 
-WORKDIR /workspace
-
-RUN npm config set registry https://registry.npmmirror.com
-
-RUN cd /workspace
-
-RUN git clone https://github.com/setube/idle-wild-my-survival-saga.git
-
-RUN mv ./idle-wild-my-survival-saga/* . ; rm -rf ./idle-wild-my-survival-saga/
-
-RUN npm install -g pnpm ; pnpm install ; npx vite build
-
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "2543"]
+FROM nginx:stable-alpine
+COPY --from=build /app/docs /usr/share/nginx/html
+EXPOSE 80

@@ -1,10 +1,12 @@
-const getRandomInt = (min, max) => {
+import type { ExplorationRegion } from '../types/game'
+
+const getRandomInt = (min: number, max: number) => {
   min = Math.ceil(min);
   max = Math.floor(max);
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
-export const explorationRegions = [
+export const explorationRegions: ExplorationRegion[] = [
   {
     id: 'forest',
     name: '森林',

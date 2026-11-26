@@ -1,12 +1,13 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { weatherTypes, selectRandomWeather, getWeatherDuration, processWeatherEvents } from '../plugins/weatherTypes'
+import type { WeatherDefinition } from '../types/game'
 
 const gameStore = useGameStore()
 
 // 当前天气
-const currentWeather = ref(weatherTypes.clear)
+const currentWeather = ref<WeatherDefinition>(weatherTypes[gameStore.weather.current] ?? weatherTypes.clear)
 
 // 天气持续时间（小时）
 const weatherDuration = ref(6)
@@ -71,7 +72,7 @@ const updateWeatherEffects = () => {
     explorationEfficiency: effects.explorationEfficiency || 1.0
   }
   // 更新游戏状态中的当前天气
-  gameStore.weather.current = Object.keys(weatherTypes)[weatherDuration.value] || 'clear'
+  gameStore.weather.current = Object.keys(weatherTypes).find(key => weatherTypes[key].name === currentWeather.value.name) ?? 'clear'
 }
 
 // 检查是否需要更新天气
@@ -81,9 +82,9 @@ const checkWeatherChange = () => {
   const nextChangeDay = gameStore.weather.nextChangeDay
   const nextChangeHour = gameStore.weather.nextChangeHour
   currentWeather.value = weatherTypes[gameStore.weather.current]
-  if (currentDay >= nextChangeDay && currentHour >= nextChangeHour) {
-    updateWeatherEffects()
+  if (currentDay > nextChangeDay || (currentDay === nextChangeDay && currentHour >= nextChangeHour)) {
     generateWeather()
+    updateWeatherEffects()
     updateNextWeatherChangeTime()
     applyWeatherEffects()
     gameStore.saveGame()
@@ -312,7 +313,7 @@ watch(() => [gameStore.gameTime.day, gameStore.gameTime.hour], () => checkWeathe
       <div class="weather-icon">{{ currentWeather.icon }}</div>
       <div class="weather-info">
         <div class="weather-name">{{ currentWeather.name }}</div>
-        <div class="weather-effect">{{ currentWeather.effect }}</div>
+        <div class="weather-effect">{{ currentWeather.description }}</div>
       </div>
     </div>
     <div class="weather-forecast">

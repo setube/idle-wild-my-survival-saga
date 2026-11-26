@@ -1,9 +1,15 @@
-<script setup>
-import { computed } from 'vue'
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { getEnergyRecovery } from '../plugins/energyMechanics'
 import { useGameStore } from '../stores/gameStore'
 import { skills } from '../plugins/skillTree'
 
 const gameStore = useGameStore()
+const energyHelpVisible = ref(false)
+const energyRecovery = computed(() => getEnergyRecovery(gameStore))
+const energyShortagePenalty = computed(() => gameStore.player.maxEnergy * (['hot', 'cold', 'storm'].includes(gameStore.weather.current) ? 0.08 : 0.05))
+const formatEnergy = (value: number) => Number(value.toFixed(2)).toString()
 
 // 计算玩家属性百分比
 const healthPercentage = computed(() => {
@@ -110,7 +116,9 @@ const checkLevelUp = () => {
 			<div class="stat-item">
 				<div class="stat-label">
 					<span class="stat-icon">⚡</span>
-					<span>体力</span>
+					<button type="button" class="energy-help-button" aria-label="查看体力恢复与消耗说明" @click="energyHelpVisible = true" @keydown.enter.prevent="energyHelpVisible = true" @keydown.space.prevent="energyHelpVisible = true">
+            体力 <span aria-hidden="true">ⓘ</span>
+          </button>
 					<span class="stat-value">{{ Math.floor(gameStore.player.energy) }}/{{ Math.floor(gameStore.player.maxEnergy)
 					}}</span>
 				</div>
@@ -142,10 +150,38 @@ const checkLevelUp = () => {
 				<span>四季循环: {{ Math.floor(gameStore.player.days / 120) }}</span>
 			</div>
 		</div>
+    <el-dialog v-model="energyHelpVisible" title="体力恢复与消耗" width="min(560px, calc(100vw - 32px))" append-to-body>
+      <p>体力在每个游戏整点自动恢复，达到上限后不再增加。暂停游戏会停止时间与恢复；时间流速只影响等待时间。</p>
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="当前自然恢复">{{ formatEnergy(energyRecovery.natural) }} 点 / 游戏小时</el-descriptions-item>
+        <el-descriptions-item label="当前建筑恢复">{{ formatEnergy(energyRecovery.building) }} 点 / 游戏小时</el-descriptions-item>
+        <el-descriptions-item label="当前合计恢复">{{ formatEnergy(energyRecovery.total) }} 点 / 游戏小时（未扣除饥渴影响）</el-descriptions-item>
+      </el-descriptions>
+      <ul class="energy-help-list">
+        <li>白天每小时恢复体力上限的 1%；夜间 22:00 至次日 06:00（含 06:00 整点）恢复 5%。当前为{{ energyRecovery.isNight ? '夜间' : '白天' }}。</li>
+        <li>酷热、寒冷天气使自然恢复降低 20%。庇护所额外恢复受季节影响：春季 ×1.1、夏季 ×0.9、秋季 ×1、冬季 ×0.8。</li>
+        <li>采集、制作与探索开始时消耗体力。采集技能和通用节能技能可以减少对应消耗；采集与制作每次至少消耗 1 点。</li>
+        <li>每小时先消耗食物和水；任一种耗尽时，额外扣除体力上限的 5%，酷热、寒冷、风暴中扣除 8%。当前可能额外扣除 {{ formatEnergy(energyShortagePenalty) }} 点。</li>
+        <li>提升幸存者人数会补满体力并提高体力上限；探索危险和随机事件也可能消耗体力。体力不足时，先等整点恢复并储备食物和水。</li>
+      </ul>
+      <template #footer><el-button type="primary" @click="energyHelpVisible = false">知道了</el-button></template>
+    </el-dialog>
 	</div>
 </template>
 
 <style scoped>
+.energy-help-button {
+  min-height: 44px;
+  padding: 0 4px;
+}
+.energy-help-list {
+  line-height: 1.7;
+  padding-left: 20px;
+}
+.energy-help-list li + li {
+  margin-top: 8px;
+}
+
 .player-status {
 	background-color: var(--el-bg-color-overlay);
 	border-radius: 4px;
